@@ -2980,3 +2980,647 @@ never reach outside the games folder."
 ```
 
 ---
+
+### Task 11: HUD, pause dialog and audio
+
+**Files:**
+- Create: `engine/shell/hud.ts`, `engine/shell/pause.ts`, `engine/platform/audio.ts`
+- Test: `engine/shell/hud.browser.test.ts`, `engine/shell/pause.browser.test.ts`, `engine/platform/audio.test.ts`
+
+**Interfaces:**
+- Consumes: `$` from Task 2, `t` from Task 4, `srSay` from Task 5.
+- Produces:
+  - From `hud.ts`: `setTitle(text)`, `setScore(n)`, `resetHud()`.
+  - From `pause.ts`: `type PauseAction = 'resume' | 'restart' | 'quit'`, `openPause(onAction): void`, `closePause(): void`, `isPaused(): boolean`.
+  - From `audio.ts`: `beep(freq: number, ms: number): void`, `muteAudio(on: boolean): void`.
+
+> The pause dialog is where keyboard accessibility is usually lost. Three things must hold and are
+> therefore tested: focus moves into the dialog when it opens, Tab cannot escape it while it is open,
+> and focus returns to whatever had it when the dialog closes. A modal that a keyboard user can Tab
+> out of is a modal that traps them behind an invisible wall.
+
+- [ ] **Step 1: Write the failing HUD test**
+
+`engine/shell/hud.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it } from 'vitest';
+import { resetHud, setScore, setTitle } from './hud.js';
+
+beforeEach(() => {
+  document.body.innerHTML = '<h1 id="game-title"></h1><strong id="hud-score" aria-live="off">0</strong>';
+});
+
+describe('hud', () => {
+  it('writes the title', () => {
+    setTitle('Snake');
+    expect(document.querySelector('#game-title')!.textContent).toBe('Snake');
+  });
+
+  it('also writes the title into the document title, so the browser tab is not generic', () => {
+    setTitle('Pong');
+    expect(document.title).toContain('Pong');
+  });
+
+  it('writes the score', () => {
+    setScore(42);
+    expect(document.querySelector('#hud-score')!.textContent).toBe('42');
+  });
+
+  it('leaves the score out of the live region, so sixty points are not sixty announcements', () => {
+    setScore(1);
+    expect(document.querySelector('#hud-score')!.getAttribute('aria-live')).toBe('off');
+  });
+
+  it('resets the score to zero', () => {
+    setScore(9);
+    resetHud();
+    expect(document.querySelector('#hud-score')!.textContent).toBe('0');
+  });
+
+  it('does not throw when the elements are missing', () => {
+    document.body.innerHTML = '';
+    expect(() => { setTitle('x'); setScore(1); resetHud(); }).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Write the failing pause test**
+
+`engine/shell/pause.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { closePause, isPaused, openPause, type PauseAction } from './pause.js';
+
+const MARKUP = `
+  <button id="before">outside</button>
+  <div id="game-region" tabindex="0">
+    <div id="pause" hidden>
+      <div class="pause-card" role="dialog" aria-modal="true" aria-labelledby="pause-h">
+        <h2 id="pause-h">Pausa</h2>
+        <div id="pause-menu" role="menu">
+          <button type="button" role="menuitem" data-act="resume">Continuar</button>
+          <button type="button" role="menuitem" data-act="restart">Reiniciar</button>
+          <button type="button" role="menuitem" data-act="quit">Voltar</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+const tab = (shift = false): KeyboardEvent =>
+  new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
+
+beforeEach(() => { document.body.innerHTML = MARKUP; closePause(); });
+
+describe('pause dialog', () => {
+  it('starts closed', () => {
+    expect(isPaused()).toBe(false);
+    expect(document.querySelector('#pause')!.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('shows the overlay when opened', () => {
+    openPause(() => {});
+    expect(isPaused()).toBe(true);
+    expect(document.querySelector('#pause')!.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('moves focus into the dialog on open', () => {
+    openPause(() => {});
+    expect(document.activeElement).toBe(document.querySelector('[data-act="resume"]'));
+  });
+
+  it('returns focus to whatever had it before, on close', () => {
+    const before = document.querySelector<HTMLElement>('#before')!;
+    before.focus();
+    openPause(() => {});
+    closePause();
+    expect(document.activeElement).toBe(before);
+  });
+
+  it('wraps Tab from the last item back to the first', () => {
+    openPause(() => {});
+    document.querySelector<HTMLElement>('[data-act="quit"]')!.focus();
+    document.querySelector('#pause')!.dispatchEvent(tab());
+    expect(document.activeElement).toBe(document.querySelector('[data-act="resume"]'));
+  });
+
+  it('wraps Shift+Tab from the first item back to the last', () => {
+    openPause(() => {});
+    document.querySelector<HTMLElement>('[data-act="resume"]')!.focus();
+    document.querySelector('#pause')!.dispatchEvent(tab(true));
+    expect(document.activeElement).toBe(document.querySelector('[data-act="quit"]'));
+  });
+
+  it('reports the action of the button that was clicked', () => {
+    const seen: PauseAction[] = [];
+    openPause((a) => seen.push(a));
+    document.querySelector<HTMLElement>('[data-act="restart"]')!.click();
+    expect(seen).toEqual(['restart']);
+  });
+
+  it('closes itself on resume', () => {
+    openPause(() => {});
+    document.querySelector<HTMLElement>('[data-act="resume"]')!.click();
+    expect(isPaused()).toBe(false);
+  });
+
+  it('resumes on Escape', () => {
+    const seen: PauseAction[] = [];
+    openPause((a) => seen.push(a));
+    document.querySelector('#pause')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(seen).toEqual(['resume']);
+    expect(isPaused()).toBe(false);
+  });
+
+  it('ignores a second open while already paused', () => {
+    const first = vi.fn();
+    openPause(first);
+    openPause(vi.fn());
+    document.querySelector<HTMLElement>('[data-act="quit"]')!.click();
+    expect(first).toHaveBeenCalledWith('quit');
+  });
+});
+```
+
+- [ ] **Step 3: Write the failing audio test**
+
+`engine/platform/audio.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beep, muteAudio } from './audio.js';
+
+const started: number[] = [];
+
+class FakeOsc {
+  frequency = { value: 0 };
+  type = '';
+  connect(): void {}
+  start(): void { started.push(this.frequency.value); }
+  stop(): void {}
+}
+
+beforeEach(() => {
+  started.length = 0;
+  muteAudio(false);
+  vi.stubGlobal('AudioContext', class {
+    currentTime = 0;
+    destination = {};
+    createOscillator(): FakeOsc { return new FakeOsc(); }
+    createGain() { return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
+  });
+});
+
+describe('audio', () => {
+  it('plays a tone at the requested frequency', () => {
+    beep(440, 50);
+    expect(started).toEqual([440]);
+  });
+
+  it('plays nothing while muted', () => {
+    muteAudio(true);
+    beep(440, 50);
+    expect(started).toEqual([]);
+  });
+
+  it('resumes playing when unmuted', () => {
+    muteAudio(true);
+    beep(440, 50);
+    muteAudio(false);
+    beep(880, 50);
+    expect(started).toEqual([880]);
+  });
+
+  it('does not throw when the browser has no AudioContext', () => {
+    vi.stubGlobal('AudioContext', undefined);
+    expect(() => beep(440, 50)).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 4: Run all three to verify they fail**
+
+Run: `npx vitest run engine/shell/hud engine/shell/pause engine/platform/audio`
+Expected: FAIL — unresolved imports for `hud.js`, `pause.js`, `audio.js`.
+
+- [ ] **Step 5: Write `engine/shell/hud.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// shell/hud — the score strip. Deliberately tiny: anything richer is the game's own business and
+// belongs on the canvas.
+//
+// The score is NOT in a live region. A screen reader would otherwise read every increment aloud, and
+// in a game that scores sixty times a minute that is not information, it is noise that drowns out the
+// announcements that matter. Games call srSay() at the moments worth interrupting for.
+import { $ } from '../ui/dom.js';
+
+export function setTitle(text: string): void {
+  const el = $('#game-title');
+  if (el) el.textContent = text;
+  document.title = `${text} · JS Minigames`;
+}
+
+export function setScore(n: number): void {
+  const el = $('#hud-score');
+  if (el) el.textContent = String(n);
+}
+
+export function resetHud(): void { setScore(0); }
+```
+
+- [ ] **Step 6: Write `engine/shell/pause.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// shell/pause — the modal pause menu, written once for every game.
+//
+// Three properties make it usable without a mouse, and all three are tested: focus enters the dialog
+// on open, Tab cycles inside it and cannot reach the page behind, and focus goes back where it came
+// from on close. A dialog missing the third one strands a keyboard user at the top of the document
+// every time they unpause.
+import { $, $$ } from '../ui/dom.js';
+
+export type PauseAction = 'resume' | 'restart' | 'quit';
+
+let open = false;
+let restoreFocus: HTMLElement | null = null;
+let handler: ((a: PauseAction) => void) | null = null;
+
+export function isPaused(): boolean { return open; }
+
+const items = (): HTMLElement[] => $$<HTMLElement>('#pause-menu [data-act]');
+
+function onKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') { e.preventDefault(); act('resume'); return; }
+  if (e.key !== 'Tab') return;
+  const list = items();
+  if (list.length === 0) return;
+  const i = list.indexOf(document.activeElement as HTMLElement);
+  e.preventDefault();
+  const next = e.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : (i === list.length - 1 ? 0 : i + 1);
+  list[next]!.focus();
+}
+
+function onClick(e: Event): void {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+  if (btn) act(btn.dataset['act'] as PauseAction);
+}
+
+function act(a: PauseAction): void {
+  const fn = handler;
+  if (a === 'resume') closePause();
+  fn?.(a);
+}
+
+export function openPause(onAction: (a: PauseAction) => void): void {
+  if (open) return;                       // a second open must not replace the first handler
+  const panel = $<HTMLElement>('#pause');
+  if (!panel) return;
+  handler = onAction;
+  restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  panel.hidden = false;
+  open = true;
+  panel.addEventListener('keydown', onKeyDown);
+  panel.addEventListener('click', onClick);
+  items()[0]?.focus();
+}
+
+export function closePause(): void {
+  const panel = $<HTMLElement>('#pause');
+  if (panel) {
+    panel.hidden = true;
+    panel.removeEventListener('keydown', onKeyDown);
+    panel.removeEventListener('click', onClick);
+  }
+  if (open) restoreFocus?.focus();
+  open = false;
+  handler = null;
+  restoreFocus = null;
+}
+```
+
+- [ ] **Step 7: Write `engine/platform/audio.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// platform/audio — one square-wave beep. No asset files, matching the tracer's "art is data" rule.
+//
+// A game gets exactly this. Anything richer would mean sound files, and 383 games with sound files is
+// a download problem and a licensing problem at the same time.
+let ctx: AudioContext | null = null;
+let muted = false;
+
+export function muteAudio(on: boolean): void { muted = on; }
+
+export function beep(freq: number, ms: number): void {
+  if (muted) return;
+  try {
+    const Ctor = globalThis.AudioContext;
+    if (!Ctor) return;                    // no Web Audio (older browser, or a node test) — stay silent
+    ctx ??= new Ctor();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    // Ramp down rather than cutting: an abrupt stop is an audible click on every single sound.
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + ms / 1000);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + ms / 1000);
+  } catch { /* audio is never worth breaking a game over */ }
+}
+```
+
+- [ ] **Step 8: Run all three to verify they pass**
+
+Run: `npx vitest run engine/shell/hud engine/shell/pause engine/platform/audio`
+Expected: PASS. `hud` 6, `pause` 10, `audio` 4.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add engine/shell/hud.ts engine/shell/hud.browser.test.ts engine/shell/pause.ts engine/shell/pause.browser.test.ts engine/platform/audio.ts engine/platform/audio.test.ts
+git commit -m "feat: add the HUD, the modal pause menu and a beep
+
+Focus enters the dialog, cycles inside it and returns where it came from, all
+three tested. The score stays out of the live region so a screen reader is not
+told about every point."
+```
+
+---
+
+### Task 12: Boot — the composition root
+
+**Files:**
+- Create: `engine/shell/boot.ts`
+- Test: `engine/shell/boot.browser.test.ts`
+
+**Interfaces:**
+- Consumes: everything from Tasks 1–11.
+- Produces: `type GameContext`, `type GameMeta`, `type GameModule` (exactly as in the File Structure section), plus `startShell(): Promise<void>` and the debug handle `window.__demos = { pause, contrast, viz, game }`.
+
+> This is the only file that knows how the pieces fit. Everything above it is a leaf or near-leaf, and
+> everything below it — the games — receives a finished `GameContext` and never imports the engine's
+> internals. That is what keeps a game at 30 lines of overhead.
+
+- [ ] **Step 1: Write the failing test**
+
+`engine/shell/boot.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { afterEach, describe, expect, it } from 'vitest';
+import { startShell } from './boot.js';
+
+/** Loads the real play.html into the test document, then boots against it. */
+async function mountShell(hash: string): Promise<void> {
+  const html = await (await fetch('/play.html')).text();
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  document.body.innerHTML = parsed.body.innerHTML;
+  location.hash = hash;
+  await startShell();
+}
+
+afterEach(() => { document.body.innerHTML = ''; location.hash = ''; });
+
+describe('startShell', () => {
+  it('reports a missing game instead of failing silently', async () => {
+    await mountShell('#no-such-category/no-such-game');
+    expect(document.querySelector('#sr-alert')!.textContent).not.toBe('');
+    expect(document.querySelector('#game-title')!.textContent).toContain('no-such-game');
+  });
+
+  it('boots a real game and puts a canvas in the game region', async () => {
+    await mountShell('#arcade-classico/snake');
+    const cv = document.querySelector('#game-region canvas');
+    expect(cv).not.toBeNull();
+    expect((cv as HTMLCanvasElement).width).toBe(320);
+    expect((cv as HTMLCanvasElement).height).toBe(180);
+  });
+
+  it('shows the game title from its meta', async () => {
+    await mountShell('#arcade-classico/snake');
+    expect(document.querySelector('#game-title')!.textContent).toBeTruthy();
+  });
+
+  it('installs the six colour-vision filters', async () => {
+    await mountShell('#arcade-classico/snake');
+    expect(document.querySelectorAll('#cvd-filters filter').length).toBe(6);
+  });
+
+  it('focuses the game region, so the keyboard reaches the game without a click', async () => {
+    await mountShell('#arcade-classico/snake');
+    expect(document.activeElement).toBe(document.querySelector('#game-region'));
+  });
+
+  it('exposes a debug handle for the preview harness', async () => {
+    await mountShell('#arcade-classico/snake');
+    expect((window as unknown as { __demos?: unknown }).__demos).toBeTruthy();
+  });
+
+  it('registers the game strings under its slug', async () => {
+    await mountShell('#arcade-classico/snake');
+    const handle = (window as unknown as { __demos: { t(k: string): string } }).__demos;
+    expect(handle.t('gameOver')).not.toBe('gameOver');
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project browser engine/shell/boot.browser.test.ts`
+Expected: FAIL — `Failed to resolve import "./boot.js"`.
+
+> The two "boots a real game" cases also need Task 13's Snake to exist. Expect them to keep failing
+> with "Game not found" until Task 13 lands; the other five must pass at the end of this task.
+
+- [ ] **Step 3: Write `engine/shell/boot.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// shell/boot — the composition root. The only module that knows how the engine fits together.
+//
+// A game receives a finished GameContext and imports nothing from the engine. That is the whole
+// economy of this project: 383 games each pay for their own rules and nothing else.
+import type { Container, Sprite } from 'pixi.js';
+import { MAX_DT } from '../core/constants.js';
+import { startLoop } from '../core/loop.js';
+import { srAlert, srSay } from '../core/a11y-sr.js';
+import { applyDom, initI18n, registerDict, scopedT, t, type GameStrings, type Translate } from '../core/i18n.js';
+import { randInt, reseed, rnd } from '../core/rng.js';
+import * as store from '../platform/storage.js';
+import { beep } from '../platform/audio.js';
+import { attachInput, type InputApi } from '../input/attach.js';
+import { initKB } from '../input/keyboard.js';
+import { installCvdFilters } from '../render/cvd-matrices.js';
+import { initViz } from '../render/viz.js';
+import { getContrastLevel, setContrastLevel, type ContrastLevel } from '../render/high-contrast.js';
+import { makeSpriteApi, type SpriteSpec } from '../render/sprites.js';
+import { mountPixi } from '../render/mount.js';
+import { $ } from '../ui/dom.js';
+import { resetHud, setScore, setTitle } from './hud.js';
+import { closePause, isPaused, openPause } from './pause.js';
+import { loaderFor, parseHash } from './router.js';
+
+export interface GameMeta {
+  slug: string; title: string; category: string;
+  density: 'leve' | 'medio' | 'denso';
+  players: 1 | 2 | 3 | 4;
+  renderer?: 'pixel' | 'svg' | '3d';
+  rendererWhy?: string;
+}
+
+export interface GameContext {
+  stage: Container;
+  input: InputApi;
+  sprites: { make(spec: SpriteSpec): Sprite };
+  audio: { beep(freq: number, ms: number): void };
+  rng: { rnd(): number; randInt(lo: number, hi: number): number; reseed(s: number): void };
+  storage: { get(k: string, f?: string | null): string | null; set(k: string, v: string | number | boolean): boolean };
+  t: Translate;
+  srSay(text: string): void;
+  srAlert(text: string): void;
+  onGameOver(score: number): void;
+}
+
+export interface GameModule {
+  meta: GameMeta;
+  strings: GameStrings;
+  setup(ctx: GameContext): void;
+  update(dt: number): void;
+  teardown(): void;
+}
+
+/**
+ * A game declaring a non-pixel renderer must say why (D6). The build cannot check a runtime value, so
+ * the check lives here and is loud: a silent deviation is exactly what the decision was meant to stop.
+ */
+function assertRenderer(meta: GameMeta): void {
+  if (meta.renderer && meta.renderer !== 'pixel' && !meta.rendererWhy) {
+    throw new Error(`Game "${meta.slug}" declares renderer "${meta.renderer}" without rendererWhy (see spec D6).`);
+  }
+}
+
+export async function startShell(): Promise<void> {
+  initKB();
+  initI18n();
+  applyDom(document);
+
+  const region = $<HTMLElement>('#game-region');
+  if (!region) return;
+
+  installCvdFilters($('#cvd-filters'));
+  initViz($('#cvd-filters'), region);
+  setContrastLevel(Number(store.get(store.KEYS.contrast, '0')) as ContrastLevel);
+
+  const route = parseHash(location.hash);
+  const load = route ? loaderFor(route.category, route.slug) : null;
+  if (!route || !load) {
+    const label = t('shell.notFound', { slug: route ? `${route.category}/${route.slug}` : '—' });
+    setTitle(label);
+    srAlert(label);
+    return;
+  }
+
+  const mod = (await load()) as GameModule;
+  assertRenderer(mod.meta);
+  registerDict(mod.meta.slug, mod.strings);
+
+  const mount = mountPixi(region);
+  const input = attachInput(region, mod.meta.players);
+  const sprites = makeSpriteApi(mount.stage);
+  const gameT = scopedT(mod.meta.slug);
+
+  setTitle(mod.meta.title);
+  resetHud();
+
+  const hiKey = store.KEYS.highScore(mod.meta.slug);
+  const ctx: GameContext = {
+    stage: mount.stage,
+    input,
+    sprites,
+    audio: { beep },
+    rng: { rnd, randInt, reseed },
+    storage: { get: (k, f = null) => store.get(k, f), set: (k, v) => store.set(k, v) },
+    t: gameT,
+    srSay,
+    srAlert,
+    onGameOver(score) {
+      setScore(score);
+      const best = Number(store.get(hiKey, '0'));
+      if (score > best) store.set(hiKey, score);
+      srAlert(t('shell.gameOver', { score }));
+    },
+  };
+
+  mod.setup(ctx);
+
+  function teardown(): void {
+    mod.teardown();
+    sprites.clear();
+    input.detach();
+    mount.destroy();
+  }
+
+  startLoop(mount.app.ticker, (dt) => {
+    if (isPaused()) return;
+    input.poll();
+    mod.update(dt);
+  }, MAX_DT);
+
+  // Pause is the shell's, not the game's: one implementation, one focus contract, 383 games.
+  region.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || isPaused()) return;
+    e.preventDefault();
+    openPause((action) => {
+      if (action === 'restart') { mod.teardown(); resetHud(); mod.setup(ctx); }
+      if (action === 'quit') { teardown(); location.href = './index.html'; }
+    });
+  });
+
+  // Reloading on hash change is cruder than swapping games in place, and correct: a game that ends by
+  // being torn down cannot leave a stray ticker, listener or texture behind to haunt the next one.
+  window.addEventListener('hashchange', () => location.reload());
+
+  region.focus();
+  srSay(mod.meta.title);
+
+  (window as unknown as Record<string, unknown>)['__demos'] = {
+    game: mod.meta, t: gameT,
+    pause: { open: openPause, close: closePause, isPaused },
+    contrast: { get: getContrastLevel, set: setContrastLevel },
+  };
+}
+
+if (typeof document !== 'undefined' && !import.meta.env?.['VITEST']) {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void startShell());
+  else void startShell();
+}
+```
+
+- [ ] **Step 4: Run the test**
+
+Run: `npx vitest run --project browser engine/shell/boot.browser.test.ts`
+Expected: 5 PASS, 2 FAIL with "Game not found" — Snake does not exist yet. Task 13 turns those green.
+
+- [ ] **Step 5: Run typecheck**
+
+Run: `npx tsc --noEmit`
+Expected: no output, exit 0.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add engine/shell/boot.ts engine/shell/boot.browser.test.ts
+git commit -m "feat: add the composition root
+
+Boot is the only module that knows how the engine fits together; a game gets a
+finished GameContext and imports none of it. Pause, restart and quit belong to
+the shell, so all 383 games share one focus contract. A non-pixel renderer
+without a justification throws rather than passing quietly."
+```
+
+---
