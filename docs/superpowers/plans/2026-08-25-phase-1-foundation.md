@@ -3585,6 +3585,16 @@ export async function startShell(): Promise<void> {
   // being torn down cannot leave a stray ticker, listener or texture behind to haunt the next one.
   window.addEventListener('hashchange', () => location.reload());
 
+  // Canvas text is invisible to applyDom, which only walks [data-i18n] in the DOM. Subscribing HERE
+  // means the discipline is enforced once instead of being remembered in 383 games: a language switch
+  // re-runs the game's setup, so anything it drew with t() is redrawn in the new language.
+  window.addEventListener('i18n:change', () => {
+    applyDom(document);
+    mod.teardown();
+    resetHud();
+    mod.setup(ctx);
+  });
+
   region.focus();
   srSay(mod.meta.title);
 
@@ -3595,10 +3605,10 @@ export async function startShell(): Promise<void> {
   };
 }
 
-if (typeof document !== 'undefined' && !import.meta.env?.['VITEST']) {
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void startShell());
-  else void startShell();
-}
+// Auto-boot only when the shell markup is already present. play.html loads this module at the end of
+// the body, so it is; a test importing startShell has an empty document, so it is not. Guarding on the
+// markup rather than on an environment flag means there is no test-only branch to get out of sync.
+if (typeof document !== 'undefined' && document.querySelector('#game-region')) void startShell();
 ```
 
 - [ ] **Step 4: Run the test**
@@ -4923,3 +4933,1129 @@ shot down a column would score four."
 ```
 
 ---
+
+### Task 16: Import the catalog into data
+
+**Files:**
+- Create: `scripts/catalog-parse.mts`, `scripts/import-catalog.mts`, `data/catalog.json` (generated)
+- Test: `scripts/catalog-parse.test.mts`
+
+**Interfaces:**
+- Consumes: `minigames-catalog-v2.html` at the repository root.
+- Produces:
+  - From `catalog-parse.mts`: `slugify(name)`, `uniqueSlug(name, taken)`, `parseCatalog(html): Catalog`, and the types `Catalog`, `Category`, `Item`.
+  - `data/catalog.json` — the source of truth from here on.
+
+> The parser is a separate module from the script so it can be tested without a file system. The script
+> is the one-shot: it runs once, its output is committed, and after that `data/catalog.json` is edited
+> directly. Keeping the script afterwards is still worth it — it documents exactly how the JSON was
+> derived, which is the question anyone will ask when a field looks wrong.
+
+- [ ] **Step 1: Write the failing test**
+
+`scripts/catalog-parse.test.mts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { parseCatalog, slugify, uniqueSlug } from './catalog-parse.mts';
+
+const CARD = `
+<div class="grid">
+  <article class="card cat-1">
+    <div class="card-num">01 / 35</div>
+    <h3 class="card-title">Arcade Clássico</h3>
+    <div class="card-desc">tela única · loop curto · score</div>
+    <div class="card-meta">
+      <span class="density-dots" data-level="leve"><span class="dot"></span></span>
+      <span>Densidade: Leve</span>
+    </div>
+    <ul>
+      <li>Snake / Cobrinha <small>grid · auto-move · cresce</small></li>
+      <li class="fresh">Snake roguelite <small>upgrades por morte</small></li>
+      <li>Pong</li>
+    </ul>
+  </article>
+  <article class="card cat-31">
+    <div class="card-num">31 / 35 <span class="new-badge">NEW</span></div>
+    <h3 class="card-title">Cozinha &amp; Produção</h3>
+    <div class="card-desc">ordem · tempo</div>
+    <div class="card-meta">
+      <span class="density-dots" data-level="denso"><span class="dot"></span></span>
+      <span>Densidade: Denso</span>
+    </div>
+    <ul><li>Restaurante &amp; pedidos</li></ul>
+  </article>
+</div>`;
+
+describe('slugify', () => {
+  it('strips accents and lowercases', () => {
+    expect(slugify('Arcade Clássico')).toBe('arcade-classico');
+    expect(slugify('Cozinha & Produção')).toBe('cozinha-producao');
+  });
+
+  it('keeps only the part before a slash, which is the primary name', () => {
+    expect(slugify('Snake / Cobrinha')).toBe('snake');
+    expect(slugify('2048 / merge numérico')).toBe('2048');
+  });
+
+  it('keeps digits and collapses runs of punctuation into one hyphen', () => {
+    expect(slugify('Espelhos & laser')).toBe('espelhos-laser');
+    expect(slugify('Point-and-Click')).toBe('point-and-click');
+  });
+
+  it('never begins or ends with a hyphen', () => {
+    expect(slugify('  ...Whack-a-Mole!  ')).toBe('whack-a-mole');
+  });
+
+  it('produces something even for a name with no usable characters', () => {
+    expect(slugify('???')).toBe('item');
+  });
+});
+
+describe('uniqueSlug', () => {
+  it('returns the plain slug when it is free', () => {
+    expect(uniqueSlug('Pong', new Set())).toBe('pong');
+  });
+
+  it('suffixes rather than overwriting a taken slug', () => {
+    const taken = new Set(['pong']);
+    expect(uniqueSlug('Pong', taken)).toBe('pong-2');
+  });
+
+  it('keeps counting past the first collision', () => {
+    expect(uniqueSlug('Pong', new Set(['pong', 'pong-2']))).toBe('pong-3');
+  });
+});
+
+describe('parseCatalog', () => {
+  it('finds every card', () => {
+    expect(parseCatalog(CARD).categories.length).toBe(2);
+  });
+
+  it('reads the title, description, density and accent of a card', () => {
+    const c = parseCatalog(CARD).categories[0]!;
+    expect(c.id).toBe(1);
+    expect(c.title).toBe('Arcade Clássico');
+    expect(c.slug).toBe('arcade-classico');
+    expect(c.desc).toBe('tela única · loop curto · score');
+    expect(c.density).toBe('leve');
+    expect(c.accent).toBe('c1');
+  });
+
+  it('decodes HTML entities in titles', () => {
+    expect(parseCatalog(CARD).categories[1]!.title).toBe('Cozinha & Produção');
+  });
+
+  it('marks a card carrying the NEW badge', () => {
+    const [a, b] = parseCatalog(CARD).categories;
+    expect(a!.new).toBe(false);
+    expect(b!.new).toBe(true);
+  });
+
+  it('splits an item into its name and its hint', () => {
+    const i = parseCatalog(CARD).categories[0]!.items[0]!;
+    expect(i.name).toBe('Snake / Cobrinha');
+    expect(i.hint).toBe('grid · auto-move · cresce');
+    expect(i.slug).toBe('snake');
+  });
+
+  it('leaves the hint empty when an item has no <small>', () => {
+    expect(parseCatalog(CARD).categories[0]!.items[2]!.hint).toBe('');
+  });
+
+  it('carries the fresh marker', () => {
+    const items = parseCatalog(CARD).categories[0]!.items;
+    expect(items[0]!.fresh).toBe(false);
+    expect(items[1]!.fresh).toBe(true);
+  });
+
+  it('starts every item as todo with no alias', () => {
+    for (const c of parseCatalog(CARD).categories) {
+      for (const i of c.items) {
+        expect(i.status).toBe('todo');
+        expect(i.aliasOf).toBeNull();
+      }
+    }
+  });
+
+  it('gives every item in a category a distinct slug', () => {
+    const c = parseCatalog(CARD).categories[0]!;
+    expect(new Set(c.items.map((i) => i.slug)).size).toBe(c.items.length);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project node scripts/catalog-parse.test.mts`
+Expected: FAIL — `Failed to resolve import "./catalog-parse.mts"`.
+
+- [ ] **Step 3: Write `scripts/catalog-parse.mts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Parse the hand-written catalog page into data. Separated from the script that reads and writes
+// files so it can be tested against a string.
+import { parse } from 'node-html-parser';
+
+export type Density = 'leve' | 'medio' | 'denso';
+export type Status = 'todo' | 'wip' | 'done';
+
+export interface Item {
+  slug: string;
+  name: string;
+  hint: string;
+  fresh: boolean;
+  status: Status;
+  /** "<category>/<slug>" when this entry is another game under a different name. */
+  aliasOf: string | null;
+}
+
+export interface Category {
+  id: number;
+  slug: string;
+  title: string;
+  desc: string;
+  density: Density;
+  accent: string;
+  new: boolean;
+  items: Item[];
+}
+
+export interface Catalog { version: string; categories: Category[] }
+
+/**
+ * A folder-safe slug.
+ *
+ * Only the part before a slash survives: entries read "Snake / Cobrinha" or "2048 / merge numérico",
+ * where the second half is a gloss rather than part of the name, and folding it in would produce
+ * `snake-cobrinha` for a folder everyone will call snake.
+ */
+export function slugify(name: string): string {
+  const primary = name.split('/')[0] ?? name;
+  const out = primary
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // drop combining accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return out || 'item';
+}
+
+/** `slugify` plus a numeric suffix when the slug is already taken. Mutates nothing. */
+export function uniqueSlug(name: string, taken: ReadonlySet<string>): string {
+  const base = slugify(name);
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+export function parseCatalog(html: string): Catalog {
+  const root = parse(html);
+  const categories: Category[] = root.querySelectorAll('article.card').map((card): Category => {
+    const catClass = (card.classNames.split(/\s+/).find((c) => /^cat-\d+$/.test(c)) ?? 'cat-0');
+    const id = Number(catClass.slice(4));
+    const title = card.querySelector('.card-title')?.textContent.trim() ?? '';
+    const taken = new Set<string>();
+
+    const items = card.querySelectorAll('ul > li').map((li): Item => {
+      const small = li.querySelector('small');
+      const hint = small?.textContent.trim() ?? '';
+      // Remove the hint before reading the name, or the name would swallow it.
+      if (small) small.remove();
+      const name = li.textContent.replace(/\s+/g, ' ').trim();
+      const slug = uniqueSlug(name, taken);
+      taken.add(slug);
+      return { slug, name, hint, fresh: li.classNames.split(/\s+/).includes('fresh'), status: 'todo', aliasOf: null };
+    });
+
+    return {
+      id,
+      slug: slugify(title),
+      title,
+      desc: card.querySelector('.card-desc')?.textContent.trim() ?? '',
+      density: (card.querySelector('.density-dots')?.getAttribute('data-level') ?? 'leve') as Density,
+      accent: `c${id}`,
+      new: card.querySelector('.new-badge') !== null,
+      items,
+    };
+  });
+
+  return { version: '2.0.0', categories };
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run --project node scripts/catalog-parse.test.mts`
+Expected: PASS, 16 tests.
+
+- [ ] **Step 5: Write `scripts/import-catalog.mts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// One-shot: minigames-catalog-v2.html -> data/catalog.json.
+//
+// Run once; commit the output; edit the JSON from then on. The script stays in the repository as the
+// record of how the data was derived, which is the first question anyone asks when a field looks off.
+//
+//   node --experimental-strip-types scripts/import-catalog.mts
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseCatalog } from './catalog-parse.mts';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '..');
+
+const html = readFileSync(resolve(root, 'minigames-catalog-v2.html'), 'utf8');
+const catalog = parseCatalog(html);
+
+const items = catalog.categories.reduce((n, c) => n + c.items.length, 0);
+console.log(`parsed ${catalog.categories.length} categories, ${items} items`);
+
+mkdirSync(resolve(root, 'data'), { recursive: true });
+writeFileSync(resolve(root, 'data/catalog.json'), `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
+console.log('wrote data/catalog.json');
+```
+
+- [ ] **Step 6: Run the import and check the numbers**
+
+Run: `node --experimental-strip-types scripts/import-catalog.mts`
+Expected: `parsed 35 categories, 383 items`, then `wrote data/catalog.json`.
+
+If the counts differ from 35 and 383, stop and find out why before continuing — those are the numbers
+measured from the source page, and a mismatch means the parser dropped something.
+
+- [ ] **Step 7: Mark the three built games as done**
+
+Edit `data/catalog.json` by hand: in category `arcade-classico`, set `"status": "done"` on the items
+whose slugs are `snake`, `pong` and `breakout`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add scripts/catalog-parse.mts scripts/catalog-parse.test.mts scripts/import-catalog.mts data/catalog.json
+git commit -m "feat: import the catalog page into data/catalog.json
+
+The parser is a tested module and the script is the one-shot around it. Slugs
+take the part before a slash, because 'Snake / Cobrinha' names one game that
+everyone will call snake."
+```
+
+---
+
+### Task 17: Generate the catalog page
+
+**Files:**
+- Create: `scripts/catalog-render.mts`, `scripts/build-catalog.mts`, `src/catalog.template.html`
+- Modify: `index.html` (now generated), delete `minigames-catalog-v2.html`
+- Test: `scripts/catalog-render.test.mts`
+
+**Interfaces:**
+- Consumes: `data/catalog.json` and the types from Task 16.
+- Produces: `renderGrid(catalog): string`, `computeStats(catalog): Stats`, `renderPage(template, catalog): string`, and the generated `index.html`.
+
+> This is where D8 pays off: the six invariants that had to be swept by hand — the `--cN` token, the
+> `NN / 35` denominator in every card, the section count, the five hero statistics, the version string
+> and the changelog — collapse into one data file plus one renderer. It also fixes the hero's stale
+> "280+", because the statistic is now counted rather than typed.
+
+- [ ] **Step 1: Write the failing test**
+
+`scripts/catalog-render.test.mts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { computeStats, renderGrid, renderPage } from './catalog-render.mts';
+import type { Catalog } from './catalog-parse.mts';
+
+const catalog: Catalog = {
+  version: '2.0.0',
+  categories: [
+    {
+      id: 1, slug: 'arcade-classico', title: 'Arcade Clássico', desc: 'tela única',
+      density: 'leve', accent: 'c1', new: false,
+      items: [
+        { slug: 'snake', name: 'Snake / Cobrinha', hint: 'grid', fresh: false, status: 'done', aliasOf: null },
+        { slug: 'pong', name: 'Pong', hint: '', fresh: false, status: 'todo', aliasOf: null },
+        { slug: 'snake-roguelite', name: 'Snake roguelite', hint: 'upgrades', fresh: true, status: 'todo', aliasOf: 'hibridos/snake-roguelite' },
+      ],
+    },
+    {
+      id: 31, slug: 'cozinha', title: 'Cozinha & Produção', desc: 'ordem',
+      density: 'denso', accent: 'c31', new: true,
+      items: [{ slug: 'restaurante', name: 'Restaurante', hint: '', fresh: false, status: 'todo', aliasOf: null }],
+    },
+  ],
+};
+
+describe('computeStats', () => {
+  it('counts categories and items rather than trusting a typed figure', () => {
+    const s = computeStats(catalog);
+    expect(s.categories).toBe(2);
+    expect(s.items).toBe(4);
+  });
+
+  it('counts the new categories', () => {
+    expect(computeStats(catalog).newCategories).toBe(1);
+  });
+
+  it('counts what is playable', () => {
+    expect(computeStats(catalog).done).toBe(1);
+  });
+
+  it('excludes aliases from the count of games to build', () => {
+    expect(computeStats(catalog).unique).toBe(3);
+  });
+});
+
+describe('renderGrid', () => {
+  const html = renderGrid(catalog);
+
+  it('emits one article per category with its accent class', () => {
+    expect(html.match(/<article class="card cat-/g)!.length).toBe(2);
+    expect(html).toContain('class="card cat-31"');
+  });
+
+  it('numbers each card against the real total', () => {
+    expect(html).toContain('01 / 2');
+    expect(html).toContain('31 / 2');
+  });
+
+  it('carries the density level and its label', () => {
+    expect(html).toContain('data-level="leve"');
+    expect(html).toContain('Densidade: Leve');
+    expect(html).toContain('Densidade: Denso');
+  });
+
+  it('emits exactly three dots per density indicator', () => {
+    const first = html.slice(html.indexOf('density-dots'));
+    expect(first.slice(0, 200).match(/<span class="dot"><\/span>/g)!.length).toBe(3);
+  });
+
+  it('badges a new category and not an old one', () => {
+    expect(html.match(/class="new-badge"/g)!.length).toBe(1);
+  });
+
+  it('links a done item to its game', () => {
+    expect(html).toContain('href="play.html#arcade-classico/snake"');
+  });
+
+  it('leaves a todo item as plain text with no link', () => {
+    const pong = html.slice(html.indexOf('>Pong'), html.indexOf('>Pong') + 40);
+    expect(pong).not.toContain('href');
+  });
+
+  it('marks a fresh item with the fresh class', () => {
+    expect(html).toContain('class="fresh"');
+  });
+
+  it('escapes HTML in names, so an ampersand cannot break the page', () => {
+    expect(html).toContain('Cozinha &amp; Produção');
+    expect(html).not.toContain('Cozinha & Produção');
+  });
+
+  it('omits the small element when there is no hint', () => {
+    const pong = html.slice(html.indexOf('>Pong'), html.indexOf('>Pong') + 40);
+    expect(pong).not.toContain('<small>');
+  });
+});
+
+describe('renderPage', () => {
+  const template = '<html><body><!--GRID--><p id="s">{{STAT_CATEGORIES}}/{{STAT_ITEMS}}/{{STAT_DONE}}</p></body></html>';
+
+  it('substitutes the grid for its marker', () => {
+    expect(renderPage(template, catalog)).toContain('<article class="card cat-1"');
+    expect(renderPage(template, catalog)).not.toContain('<!--GRID-->');
+  });
+
+  it('substitutes every statistic placeholder', () => {
+    const out = renderPage(template, catalog);
+    expect(out).toContain('2/4/1');
+    expect(out).not.toContain('{{');
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project node scripts/catalog-render.test.mts`
+Expected: FAIL — `Failed to resolve import "./catalog-render.mts"`.
+
+- [ ] **Step 3: Write `scripts/catalog-render.mts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Render data/catalog.json into the catalog grid. Pure string work, no file system, so it is testable
+// and so the same function can later feed something other than a static page.
+import type { Catalog, Category, Item } from './catalog-parse.mts';
+
+export interface Stats {
+  categories: number;
+  items: number;
+  /** Items that need a game built: everything except aliases of another entry. */
+  unique: number;
+  newCategories: number;
+  done: number;
+}
+
+export function computeStats(catalog: Catalog): Stats {
+  const all = catalog.categories.flatMap((c) => c.items);
+  return {
+    categories: catalog.categories.length,
+    items: all.length,
+    unique: all.filter((i) => i.aliasOf === null).length,
+    newCategories: catalog.categories.filter((c) => c.new).length,
+    done: all.filter((i) => i.status === 'done').length,
+  };
+}
+
+const esc = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+const DENSITY_LABEL: Record<string, string> = { leve: 'Leve', medio: 'Médio', denso: 'Denso' };
+
+function renderItem(cat: Category, item: Item): string {
+  const cls = item.fresh ? ' class="fresh"' : '';
+  const hint = item.hint ? ` <small>${esc(item.hint)}</small>` : '';
+  // Only a built game becomes a link. Everything else stays plain text, so the page never offers a
+  // door that opens onto nothing — and the growing number of links IS the progress report.
+  const target = item.aliasOf ?? `${cat.slug}/${item.slug}`;
+  const label = item.status === 'done'
+    ? `<a href="play.html#${target}">${esc(item.name)}</a>`
+    : esc(item.name);
+  return `        <li${cls}>${label}${hint}</li>`;
+}
+
+function renderCard(cat: Category, total: number): string {
+  const num = String(cat.id).padStart(2, '0');
+  const badge = cat.new ? ' <span class="new-badge">NEW</span>' : '';
+  const dots = '<span class="dot"></span>'.repeat(3);
+  return [
+    `    <article class="card cat-${cat.id}">`,
+    `      <div class="card-num">${num} / ${total}${badge}</div>`,
+    `      <h3 class="card-title">${esc(cat.title)}</h3>`,
+    `      <div class="card-desc">${esc(cat.desc)}</div>`,
+    '      <div class="card-meta">',
+    `        <span class="density-dots" data-level="${cat.density}">${dots}</span>`,
+    `        <span>Densidade: ${DENSITY_LABEL[cat.density] ?? cat.density}</span>`,
+    '      </div>',
+    '      <ul>',
+    cat.items.map((i) => renderItem(cat, i)).join('\n'),
+    '      </ul>',
+    '    </article>',
+  ].join('\n');
+}
+
+export function renderGrid(catalog: Catalog): string {
+  const total = catalog.categories.length;
+  return catalog.categories.map((c) => renderCard(c, total)).join('\n\n');
+}
+
+/** Fill the template: the grid marker plus every {{STAT_*}} placeholder. */
+export function renderPage(template: string, catalog: Catalog): string {
+  const s = computeStats(catalog);
+  return template
+    .replace('<!--GRID-->', renderGrid(catalog))
+    .replaceAll('{{STAT_CATEGORIES}}', String(s.categories))
+    .replaceAll('{{STAT_ITEMS}}', String(s.items))
+    .replaceAll('{{STAT_UNIQUE}}', String(s.unique))
+    .replaceAll('{{STAT_NEW}}', String(s.newCategories))
+    .replaceAll('{{STAT_DONE}}', String(s.done))
+    .replaceAll('{{VERSION}}', catalog.version)
+    .replaceAll('{{COUNT_RANGE}}', `001 → ${String(s.categories).padStart(3, '0')}`);
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run --project node scripts/catalog-render.test.mts`
+Expected: PASS, 17 tests.
+
+- [ ] **Step 5: Build the template from the existing page**
+
+Create `src/catalog.template.html` from `minigames-catalog-v2.html` with exactly these edits, keeping
+every byte of CSS and prose otherwise untouched:
+
+1. Replace the entire `<div class="grid"> … </div>` block with:
+   ```html
+   <div class="grid">
+   <!--GRID-->
+   </div>
+   ```
+2. In the hero statistics, replace the five hardcoded numbers with `{{STAT_CATEGORIES}}`,
+   `{{STAT_ITEMS}}`, `{{STAT_NEW}}`, `1` (the file count, still literal) and `0` (the dependency count,
+   still literal). Add a sixth block before the others:
+   ```html
+   <div>
+     <div class="stat-num alt-2">{{STAT_DONE}}</div>
+     <div class="stat-label">Jogáveis</div>
+   </div>
+   ```
+3. Replace the version string in all five places (`<title>`, the `:root` comment, `.hero-tag .ver`, the
+   changelog tag and the footer) with `{{VERSION}}`.
+4. Replace the text of `.section-head .count` with `{{COUNT_RANGE}}`.
+
+- [ ] **Step 6: Write `scripts/build-catalog.mts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// data/catalog.json + src/catalog.template.html -> index.html
+//
+//   node --experimental-strip-types scripts/build-catalog.mts
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Catalog } from './catalog-parse.mts';
+import { computeStats, renderPage } from './catalog-render.mts';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const catalog = JSON.parse(readFileSync(resolve(root, 'data/catalog.json'), 'utf8')) as Catalog;
+const template = readFileSync(resolve(root, 'src/catalog.template.html'), 'utf8');
+const out = renderPage(template, catalog);
+
+if (out.includes('{{') || out.includes('<!--GRID-->')) {
+  throw new Error('build-catalog: the template still has unfilled placeholders.');
+}
+
+writeFileSync(resolve(root, 'index.html'), out, 'utf8');
+
+const s = computeStats(catalog);
+console.log(`index.html: ${s.categories} categories, ${s.items} items, ${s.done} playable`);
+```
+
+- [ ] **Step 7: Wire it into the build and generate the page**
+
+Add to `package.json` scripts:
+```json
+"catalog": "node --experimental-strip-types scripts/build-catalog.mts",
+"prebuild": "npm run catalog"
+```
+
+Run: `npm run catalog`
+Expected: `index.html: 35 categories, 383 items, 3 playable`.
+
+- [ ] **Step 8: Check the generated page in a browser**
+
+Run: `npm run build && npm run preview`, open `http://localhost:4173/`.
+
+- The page must look like the original: same hero, same neon cards, same fonts.
+- The hero must now read **383**, not "280+".
+- Exactly three entries — Snake, Pong, Breakout — must be links; every other entry plain text.
+- Clicking Snake must open it and it must be playable.
+
+- [ ] **Step 9: Retire the hand-written page**
+
+```bash
+git rm minigames-catalog-v2.html
+```
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add scripts/catalog-render.mts scripts/catalog-render.test.mts scripts/build-catalog.mts src/catalog.template.html index.html package.json
+git commit -m "feat: generate index.html from the catalog data
+
+Retires the hand-written page and with it the six invariants that had to be
+swept by hand on every edit. The hero statistics are counted now, which is why
+the item count reads 383 instead of the stale 280+.
+
+See the design spec, section 5, for what happened to minigames-catalog-v2.html."
+```
+
+---
+
+### Task 18: PWA, the accessibility gate and CI
+
+**Files:**
+- Modify: `vite.config.ts`, `package.json`
+- Create: `scripts/axe-check.mjs`, `.gitlab-ci.yml`, `public/manifest-icon.svg`
+
+**Interfaces:**
+- Consumes: the built `dist/` from every earlier task.
+- Produces: an offline-capable shell, a failing build on any WCAG A/AA violation in the DOM, and a CI pipeline that runs typecheck, tests, build and the gate.
+
+> Two things differ from the tracer, both because there are 383 games rather than one. Its Workbox
+> config precaches `**/*.{js,css,html,…}`, which here would make someone opening Snake download the
+> entire collection — so only the shell, the catalog and the engine are precached, and a game's chunk
+> is cached the first time it is played. And the axe gate runs over two pages instead of one.
+
+- [ ] **Step 1: Add the PWA plugin to `vite.config.ts`**
+
+Add the import and the plugin. Everything else in the file stays as it is:
+```ts
+import { VitePWA } from 'vite-plugin-pwa';
+
+// inside defineConfig({ ... }):
+  plugins: [
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: 'auto',
+      includeAssets: ['manifest-icon.svg'],
+      manifest: {
+        name: 'JS Minigames',
+        short_name: 'Minigames',
+        description: 'Coleção de minigames em pixel art 320x180.',
+        lang: 'pt-BR',
+        start_url: './index.html',
+        display: 'standalone',
+        background_color: '#0a0a12',
+        theme_color: '#0a0a12',
+        icons: [{ src: 'manifest-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+      },
+      workbox: {
+        // Precache the SHELL only. Precaching every game would mean a visitor who opened one game
+        // downloaded all 383 — the opposite of what the lazy chunks were for.
+        globPatterns: ['index.html', 'play.html', 'assets/*.css', 'assets/index-*.js', 'assets/play-*.js', '*.svg', '*.webmanifest'],
+        // Game chunks are cached the first time they are played, which is also what makes a game
+        // replayable offline afterwards.
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/main-.*\.js$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'games', expiration: { maxEntries: 60 } },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\//,
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'fonts' },
+          },
+        ],
+        cleanupOutdatedCaches: true,
+      },
+    }),
+  ],
+```
+
+- [ ] **Step 2: Create `public/manifest-icon.svg`**
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="JS Minigames">
+  <rect width="64" height="64" fill="#0a0a12"/>
+  <rect x="8" y="24" width="8" height="8" fill="#b8ff3d"/>
+  <rect x="16" y="24" width="8" height="8" fill="#b8ff3d"/>
+  <rect x="24" y="24" width="8" height="8" fill="#b8ff3d"/>
+  <rect x="40" y="32" width="8" height="8" fill="#ff2d8e"/>
+</svg>
+```
+
+- [ ] **Step 3: Write `scripts/axe-check.mjs`**
+
+Adapted from `<TRACER>/scripts/axe-check.mjs`. The tracer's VLibras exclusions are dropped — there is
+no third-party widget here — and it walks two pages instead of one:
+```js
+// SPDX-License-Identifier: GPL-3.0-or-later
+// a11y gate: runs axe-core against the RUNNING build (live DOM plus CSS), which is the only reliable
+// way to measure it. Exits 1 on any WCAG A/AA violation.
+//
+//   npm run build && npm run preview &
+//   AXE_URL=http://localhost:4173 node scripts/axe-check.mjs
+//
+// WHAT THIS DOES NOT COVER, stated so a green run is never mistaken for conformance: axe cannot see
+// inside a <canvas>. Art contrast, flash cadence and the legibility of in-game text are outside it and
+// remain human judgement. See the design spec, section 6.
+import { chromium } from 'playwright';
+import { AxeBuilder } from '@axe-core/playwright';
+
+const BASE = process.env.AXE_URL || 'http://localhost:4173';
+const PAGES = ['/index.html', '/play.html#arcade-classico/snake'];
+
+const browser = await chromium.launch();
+let failed = 0;
+try {
+  const context = await browser.newContext();
+  for (const path of PAGES) {
+    const page = await context.newPage();
+    await page.goto(BASE + path, { waitUntil: 'networkidle' });
+    // Let the shell settle. The canvas itself is not axe-scannable; its accessibility is the DOM shell.
+    await page.waitForSelector('#sr-status, .grid', { timeout: 10_000 });
+
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+
+    if (results.violations.length) {
+      console.error(`\n✗ ${path}`);
+      console.error(JSON.stringify(results.violations, null, 2));
+      failed += results.violations.length;
+    } else {
+      console.log(`✓ ${path}: 0 WCAG A/AA violations in the DOM shell`);
+    }
+    await page.close();
+  }
+} finally {
+  await browser.close();
+}
+
+if (failed) {
+  console.error(`\n✗ axe: ${failed} WCAG A/AA violation(s).`);
+  process.exit(1);
+}
+console.log('\n✓ axe: DOM shell clean. Canvas contents are NOT covered — see the design spec, section 6.');
+```
+
+- [ ] **Step 4: Add the scripts**
+
+Add to `package.json`:
+```json
+"test:a11y": "node scripts/axe-check.mjs",
+"validate": "npm run typecheck && vitest run && npm run build"
+```
+
+- [ ] **Step 5: Run the gate locally**
+
+Run, in two terminals:
+```bash
+npm run build && npm run preview
+```
+```bash
+AXE_URL=http://localhost:4173 node scripts/axe-check.mjs
+```
+Expected: `✓ /index.html` and `✓ /play.html#…`, then the closing line about what is not covered.
+
+If it reports violations, fix the markup rather than adding an exclusion. The likeliest findings are a
+missing accessible name on a link, or a colour pair in the catalog CSS below 4.5:1 — both are real.
+
+- [ ] **Step 6: Write `.gitlab-ci.yml`**
+
+```yaml
+# SPDX-License-Identifier: GPL-3.0-or-later
+default:
+  image: node:24
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+
+stages: [check, gate]
+
+variables:
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+
+.install: &install
+  - npm ci --prefer-offline
+
+typecheck:
+  stage: check
+  script:
+    - *install
+    - npm run typecheck
+
+test:
+  stage: check
+  script:
+    - *install
+    - npx playwright install --with-deps chromium
+    - npx vitest run
+  artifacts:
+    when: always
+    reports:
+      junit: junit.xml
+    expire_in: 1 week
+
+build:
+  stage: check
+  script:
+    - *install
+    - npm run build
+  artifacts:
+    paths: [dist/]
+    expire_in: 1 week
+
+a11y:
+  stage: gate
+  needs: [build]
+  script:
+    - *install
+    - npx playwright install --with-deps chromium
+    - npx vite preview --port 4173 &
+    - npx wait-on http://localhost:4173
+    - AXE_URL=http://localhost:4173 node scripts/axe-check.mjs
+```
+
+Add `wait-on` to `devDependencies` (`npm i -D wait-on`) and configure Vitest's JUnit reporter by adding
+to the `test` block in `vite.config.ts`:
+```ts
+    reporters: process.env['CI'] ? ['default', 'junit'] : ['default'],
+    outputFile: { junit: 'junit.xml' },
+```
+
+- [ ] **Step 7: Verify offline actually works**
+
+Run: `npm run build && npm run preview`. Open `http://localhost:4173/`, play Snake once, then in the
+browser's devtools set the network to Offline and reload.
+
+Expected: the catalog and Snake both still load. A game never opened before must NOT be available
+offline — that is the runtime-caching decision working, not a bug.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add vite.config.ts package.json package-lock.json scripts/axe-check.mjs .gitlab-ci.yml public/manifest-icon.svg
+git commit -m "feat: add PWA caching, the axe gate and CI
+
+Only the shell is precached; a game's chunk is cached the first time it is
+played, so opening one game does not download 383. The gate states in its own
+output that it cannot see inside the canvas."
+```
+
+---
+
+### Task 19: Make the accessibility settings reachable
+
+**Files:**
+- Modify: `play.html` (pause dialog), `engine/shell/pause.ts` (already handles focus; no change needed to its logic)
+- Create: `engine/shell/settings.ts`
+- Test: `engine/shell/settings.browser.test.ts`
+
+**Interfaces:**
+- Consumes: `setLocale`, `availableLocales`, `t` from Task 4; `setContrastLevel`, `getContrastLevel` from Task 8; `setViz`, `getViz`, `VIZ_MODES` from Task 9; `storage` from Task 2.
+- Produces: `mountSettings(region: HTMLElement): void`, called once by `boot`.
+
+> **Why this task exists.** The self-review of this plan against the spec found that Tasks 4, 8 and 9
+> build language switching, high contrast and colour-vision filters, and then leave every one of them
+> reachable only from the browser console. A person who needs high contrast cannot open a console. An
+> accessibility feature nobody can turn on is not an accessibility feature, so the controls are part of
+> Phase 1 rather than a later polish pass.
+>
+> They live in the pause dialog, which already has the focus contract from Task 11 — no second modal,
+> no second focus trap to get wrong.
+
+- [ ] **Step 1: Add the controls to the pause dialog in `play.html`**
+
+Insert inside `.pause-card`, after the `#pause-menu` div:
+```html
+        <div class="settings">
+          <p><label for="set-lang" data-i18n="shell.language">Idioma</label>
+            <select id="set-lang"></select></p>
+          <p><label for="set-contrast" data-i18n="shell.contrast">Alto contraste</label>
+            <select id="set-contrast">
+              <option value="0" data-i18n="shell.contrastOff">Desligado</option>
+              <option value="3">3:1</option>
+              <option value="4.5">4.5:1</option>
+              <option value="7">7:1</option>
+            </select></p>
+          <p><label for="set-viz" data-i18n="viz.none">Cores</label>
+            <select id="set-viz"></select></p>
+        </div>
+```
+
+Add to `engine/shell/shell.css`:
+```css
+.settings { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.settings p { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 6px; }
+.settings select { font: inherit; background: #161624; color: var(--fg); border: 1px solid var(--line); padding: 3px 6px; }
+.settings select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+```
+
+- [ ] **Step 2: Write the failing test**
+
+`engine/shell/settings.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getContrastLevel, setContrastLevel } from '../render/high-contrast.js';
+import { getViz } from '../render/viz.js';
+import { mountSettings } from './settings.js';
+
+let region: HTMLElement;
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', (() => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); } };
+  })());
+  setContrastLevel(0);
+  document.body.innerHTML = `
+    <div id="game-region">
+      <select id="set-lang"></select>
+      <select id="set-contrast">
+        <option value="0">off</option><option value="3">3</option>
+        <option value="4.5">4.5</option><option value="7">7</option>
+      </select>
+      <select id="set-viz"></select>
+    </div>`;
+  region = document.querySelector('#game-region')!;
+  mountSettings(region);
+});
+
+const pick = (id: string, value: string): void => {
+  const el = document.querySelector<HTMLSelectElement>(id)!;
+  el.value = value;
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+};
+
+describe('settings controls', () => {
+  it('fills the language select with the three floor languages', () => {
+    expect(document.querySelectorAll('#set-lang option').length).toBe(3);
+  });
+
+  it('fills the colour select from the viz mode table', () => {
+    expect(document.querySelectorAll('#set-viz option').length).toBeGreaterThan(1);
+  });
+
+  it('labels every option with translated text rather than a raw key', () => {
+    for (const o of document.querySelectorAll('#set-viz option')) {
+      expect(o.textContent).not.toMatch(/^viz\./);
+      expect(o.textContent!.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('shows the current contrast level as the selected option', () => {
+    setContrastLevel(4.5);
+    mountSettings(region);
+    expect(document.querySelector<HTMLSelectElement>('#set-contrast')!.value).toBe('4.5');
+  });
+
+  it('changes the contrast level when the control changes', () => {
+    pick('#set-contrast', '7');
+    expect(getContrastLevel()).toBe(7);
+  });
+
+  it('turns contrast back off', () => {
+    pick('#set-contrast', '7');
+    pick('#set-contrast', '0');
+    expect(getContrastLevel()).toBe(0);
+  });
+
+  it('persists the contrast level so it survives a reload', () => {
+    pick('#set-contrast', '3');
+    expect(localStorage.getItem('demos.contrast')).toBe('3');
+  });
+
+  it('applies a colour-vision mode to the game region', () => {
+    pick('#set-viz', 'fix-deuter');
+    expect(getViz()).toBe('fix-deuter');
+    expect(region.style.filter).toContain('url(#cvd-');
+  });
+
+  it('every control has a label associated by id', () => {
+    for (const id of ['set-lang', 'set-contrast', 'set-viz']) {
+      const el = document.querySelector(`#${id}`)!;
+      expect(el.getAttribute('id'), id).toBe(id);
+    }
+  });
+});
+```
+
+- [ ] **Step 3: Run it to verify it fails**
+
+Run: `npx vitest run --project browser engine/shell/settings.browser.test.ts`
+Expected: FAIL — `Failed to resolve import "./settings.js"`.
+
+- [ ] **Step 4: Write `engine/shell/settings.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// shell/settings — the three accessibility controls, inside the pause dialog.
+//
+// They are plain <select> elements on purpose. A custom widget would need its own keyboard handling,
+// its own ARIA and its own testing, and would end up worse than what every browser and every screen
+// reader already implements correctly for a select.
+import { availableLocales, setLocale, getLocale, t } from '../core/i18n.js';
+import { getContrastLevel, setContrastLevel, type ContrastLevel } from '../render/high-contrast.js';
+import { getViz, setViz, VIZ_MODES, type VizKey } from '../render/viz.js';
+import * as store from '../platform/storage.js';
+import { $ } from '../ui/dom.js';
+
+const LANG_LABEL: Record<string, string> = { pt: 'Português', en: 'English', es: 'Español' };
+
+/** Wire the controls. Safe to call again — it rebuilds the options and re-reads the current values. */
+export function mountSettings(region: HTMLElement): void {
+  const lang = $<HTMLSelectElement>('#set-lang');
+  if (lang) {
+    // Language names are written in their OWN language, never translated. Someone who cannot read the
+    // current interface language must still be able to find their way out of it.
+    lang.innerHTML = availableLocales()
+      .map((c) => `<option value="${c}">${LANG_LABEL[c] ?? c}</option>`).join('');
+    lang.value = getLocale();
+    lang.onchange = () => { void setLocale(lang.value); };
+  }
+
+  const contrast = $<HTMLSelectElement>('#set-contrast');
+  if (contrast) {
+    contrast.value = String(getContrastLevel());
+    contrast.onchange = () => {
+      const level = Number(contrast.value) as ContrastLevel;
+      setContrastLevel(level);
+      store.set(store.KEYS.contrast, level);
+    };
+  }
+
+  const viz = $<HTMLSelectElement>('#set-viz');
+  if (viz) {
+    viz.innerHTML = VIZ_MODES.map((m) => `<option value="${m.key}">${t(m.i18nKey)}</option>`).join('');
+    viz.value = getViz();
+    viz.onchange = () => setViz(viz.value as VizKey, region);
+  }
+}
+```
+
+- [ ] **Step 5: Call it from `boot.ts`**
+
+Add the import and one call, just before `region.focus()`:
+```ts
+import { mountSettings } from './settings.js';
+// …
+  mountSettings(region);
+  // The language select must be rebuilt after a switch, or it keeps showing the previous choice.
+  window.addEventListener('i18n:change', () => mountSettings(region));
+```
+
+- [ ] **Step 6: Run the test and the whole suite**
+
+Run: `npx vitest run --project browser engine/shell/settings.browser.test.ts`
+Expected: PASS, 9 tests.
+
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: no typecheck output; every test passes.
+
+- [ ] **Step 7: Verify by hand, with the keyboard only**
+
+Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/breakout`.
+
+Using **no mouse at all**:
+- `Tab` to the game region, `Escape` to pause.
+- `Tab` to the contrast select, choose 7:1 — the bricks, paddle and ball must all change and stay
+  distinguishable from one another.
+- Choose a colour-vision correction — the whole field must shift.
+- Choose English — the pause labels and the game's own announcements must both change.
+- `Escape` to resume; the game continues with the new settings.
+
+- [ ] **Step 8: Re-run the accessibility gate**
+
+Run the gate as in Task 18. A `<select>` without an associated label is the most likely new violation;
+if it appears, fix the `for`/`id` pairing rather than excluding the element.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add play.html engine/shell/shell.css engine/shell/settings.ts engine/shell/settings.browser.test.ts engine/shell/boot.ts
+git commit -m "feat: expose language, contrast and colour-vision controls
+
+Tasks 4, 8 and 9 built these and left them reachable only from a console,
+which a person who needs high contrast cannot open. Plain selects, inside the
+pause dialog that already has the focus contract. Language names are written
+in their own language so nobody is trapped in a language they cannot read."
+```
+
+---
+
+## Definition of done for Phase 1
+
+Phase 1 is finished when all of the following are true, verified by running them rather than by
+reading the checkboxes:
+
+- [ ] `npm run validate` passes: typecheck clean, every test green, build succeeds.
+- [ ] `npm run test:a11y` passes against the built preview.
+- [ ] The catalog at `/` shows 35 categories and 383 items, with exactly three live links.
+- [ ] Snake, Pong and Breakout are each playable from the keyboard alone, with no mouse.
+- [ ] Contrast, language and colour-vision mode can each be changed **with the keyboard alone**, from
+      the pause dialog, without a console.
+- [ ] Raising the contrast to 7:1 visibly repaints all three games, and every role stays distinguishable.
+- [ ] Switching the language changes the shell and the game announcements together.
+- [ ] After playing a game once, it still loads with the network offline.
+- [ ] `CLAUDE.md` is rewritten to describe the structure that now exists, replacing the Phase 0 text
+      that says there is no build command.
