@@ -3624,3 +3624,440 @@ without a justification throws rather than passing quietly."
 ```
 
 ---
+
+### Task 13: Snake — the first reference game
+
+**Files:**
+- Create: `games/arcade-classico/snake/rules.ts`, `games/arcade-classico/snake/strings.ts`, `games/arcade-classico/snake/main.ts`
+- Test: `games/arcade-classico/snake/rules.test.ts`
+
+**Interfaces:**
+- Consumes: `GameContext`, `GameMeta`, `GameModule` from Task 12.
+- Produces: the shape every later game copies — pure `rules.ts` tested in the node project, `strings.ts` with three locales, and a thin `main.ts` that only renders and reads input.
+
+> **This task defines the pattern for the other 382 games**, so the split matters more than the game.
+> Everything decidable without a screen lives in `rules.ts` and is tested at speed in node; `main.ts`
+> owns only sprites, input and announcements. A game that mixes the two cannot be tested without a
+> browser, and 383 browser-only test suites is not a suite anyone will run.
+
+- [ ] **Step 1: Write the failing rules test**
+
+`games/arcade-classico/snake/rules.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { createSnake, step, turn, type SnakeState } from './rules.js';
+
+/** Deterministic stand-in for ctx.rng.randInt, cycling through scripted values. */
+function scripted(values: number[]): () => number {
+  let i = 0;
+  return () => values[i++ % values.length]!;
+}
+
+/** A snake laid out horizontally, head at (hx, hy), moving right, with the apple parked far away. */
+function fixture(hx: number, hy: number, len = 3): SnakeState {
+  const s = createSnake(10, 10, scripted([9, 9]));
+  s.body = Array.from({ length: len }, (_, i) => ({ x: hx - i, y: hy }));
+  s.dir = { x: 1, y: 0 };
+  s.apple = { x: 9, y: 9 };
+  return s;
+}
+
+describe('createSnake', () => {
+  it('starts alive, scoreless and moving', () => {
+    const s = createSnake(10, 10, scripted([5, 5]));
+    expect(s.alive).toBe(true);
+    expect(s.score).toBe(0);
+    expect(s.body.length).toBeGreaterThan(0);
+    expect(s.dir).not.toEqual({ x: 0, y: 0 });
+  });
+
+  it('never places the first apple on the snake', () => {
+    // The scripted rand offers the head cell first; the placement must reject it and take the next.
+    const s = createSnake(10, 10, scripted([0, 0, 5, 5]));
+    expect(s.body.some((c) => c.x === s.apple.x && c.y === s.apple.y)).toBe(false);
+  });
+});
+
+describe('turn', () => {
+  it('accepts a perpendicular turn', () => {
+    const s = fixture(5, 5);
+    turn(s, { x: 0, y: -1 });
+    step(s, scripted([9, 9]));
+    expect(s.body[0]).toEqual({ x: 5, y: 4 });
+  });
+
+  it('refuses a reversal, which would drive the head into the neck', () => {
+    const s = fixture(5, 5);
+    turn(s, { x: -1, y: 0 });
+    step(s, scripted([9, 9]));
+    expect(s.body[0]).toEqual({ x: 6, y: 5 });
+    expect(s.alive).toBe(true);
+  });
+
+  it('refuses a reversal even through two turns in the same frame', () => {
+    const s = fixture(5, 5);
+    turn(s, { x: 0, y: -1 });
+    turn(s, { x: 0, y: 1 });   // would reverse the queued direction
+    step(s, scripted([9, 9]));
+    expect(s.body[0]).toEqual({ x: 5, y: 4 });
+  });
+
+  it('allows a reversal for a snake of length one, which has no neck to hit', () => {
+    const s = fixture(5, 5, 1);
+    turn(s, { x: -1, y: 0 });
+    step(s, scripted([9, 9]));
+    expect(s.body[0]).toEqual({ x: 4, y: 5 });
+  });
+});
+
+describe('step', () => {
+  it('moves the head and drops the tail, keeping the length', () => {
+    const s = fixture(5, 5);
+    step(s, scripted([9, 9]));
+    expect(s.body[0]).toEqual({ x: 6, y: 5 });
+    expect(s.body.length).toBe(3);
+  });
+
+  it('dies on the right wall', () => {
+    const s = fixture(9, 5);
+    step(s, scripted([0, 0]));
+    expect(s.alive).toBe(false);
+  });
+
+  it('dies on the left wall', () => {
+    const s = fixture(0, 5);
+    s.dir = { x: -1, y: 0 };
+    step(s, scripted([0, 0]));
+    expect(s.alive).toBe(false);
+  });
+
+  it('dies on the top and bottom walls', () => {
+    const top = fixture(5, 0);
+    top.dir = { x: 0, y: -1 };
+    step(top, scripted([0, 0]));
+    expect(top.alive).toBe(false);
+
+    const bottom = fixture(5, 9);
+    bottom.dir = { x: 0, y: 1 };
+    step(bottom, scripted([0, 0]));
+    expect(bottom.alive).toBe(false);
+  });
+
+  it('dies on its own body', () => {
+    const s = createSnake(10, 10, scripted([9, 9]));
+    s.body = [{ x: 5, y: 5 }, { x: 5, y: 4 }, { x: 4, y: 4 }, { x: 4, y: 5 }];
+    s.dir = { x: -1, y: 0 };
+    s.apple = { x: 9, y: 9 };
+    step(s, scripted([9, 9]));
+    expect(s.alive).toBe(false);
+  });
+
+  it('survives moving into the cell its own tail is vacating', () => {
+    const s = createSnake(10, 10, scripted([9, 9]));
+    s.body = [{ x: 5, y: 5 }, { x: 5, y: 4 }, { x: 4, y: 4 }, { x: 4, y: 5 }];
+    s.dir = { x: 0, y: 1 };   // into (5,6), free; the classic bug is a false hit on the last segment
+    s.apple = { x: 9, y: 9 };
+    step(s, scripted([9, 9]));
+    expect(s.alive).toBe(true);
+  });
+
+  it('grows and scores on the apple', () => {
+    const s = fixture(5, 5);
+    s.apple = { x: 6, y: 5 };
+    step(s, scripted([1, 1]));
+    expect(s.body.length).toBe(4);
+    expect(s.score).toBe(1);
+  });
+
+  it('moves the apple somewhere free after it is eaten', () => {
+    const s = fixture(5, 5);
+    s.apple = { x: 6, y: 5 };
+    step(s, scripted([1, 1]));
+    expect(s.apple).not.toEqual({ x: 6, y: 5 });
+    expect(s.body.some((c) => c.x === s.apple.x && c.y === s.apple.y)).toBe(false);
+  });
+
+  it('does nothing once dead, so a late frame cannot resurrect the run', () => {
+    const s = fixture(9, 5);
+    step(s, scripted([0, 0]));
+    const frozen = JSON.stringify(s);
+    step(s, scripted([0, 0]));
+    expect(JSON.stringify(s)).toBe(frozen);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project node games/arcade-classico/snake`
+Expected: FAIL — `Failed to resolve import "./rules.js"`.
+
+- [ ] **Step 3: Write `games/arcade-classico/snake/rules.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Snake rules. Pure: no PixiJS, no DOM, no engine imports. Everything decidable without a screen
+// lives here so the node project can test it at speed.
+export interface Cell { x: number; y: number }
+
+export interface SnakeState {
+  cols: number;
+  rows: number;
+  /** Head first. */
+  body: Cell[];
+  dir: Cell;
+  /** The direction accepted this frame but not yet applied — see `turn`. */
+  next: Cell;
+  apple: Cell;
+  score: number;
+  alive: boolean;
+}
+
+/** Pick a free cell. `rand(n)` must return an integer in [0, n). */
+function placeApple(s: SnakeState, rand: (n: number) => number): Cell {
+  // Rejection sampling is fine here: the board is never near full in a reference game, and the
+  // alternative (enumerating free cells) allocates every single time the apple moves.
+  for (let i = 0; i < 500; i++) {
+    const c = { x: rand(s.cols), y: rand(s.rows) };
+    if (!s.body.some((b) => b.x === c.x && b.y === c.y)) return c;
+  }
+  return { x: 0, y: 0 };
+}
+
+export function createSnake(cols: number, rows: number, rand: (n: number) => number): SnakeState {
+  const midY = Math.floor(rows / 2);
+  const s: SnakeState = {
+    cols, rows,
+    body: [{ x: 3, y: midY }, { x: 2, y: midY }, { x: 1, y: midY }],
+    dir: { x: 1, y: 0 },
+    next: { x: 1, y: 0 },
+    apple: { x: 0, y: 0 },
+    score: 0,
+    alive: true,
+  };
+  s.apple = placeApple(s, rand);
+  return s;
+}
+
+/**
+ * Queue a direction for the next step.
+ *
+ * Reversal is refused, because turning back drives the head straight into the neck and reads as an
+ * unfair instant death. It is checked against the QUEUED direction, not the current one: two turns
+ * inside a single frame would otherwise sneak a reversal past the guard. A snake of length one has no
+ * neck, so it may turn freely.
+ */
+export function turn(s: SnakeState, dir: Cell): void {
+  if (dir.x === 0 && dir.y === 0) return;
+  if (s.body.length > 1 && dir.x === -s.next.x && dir.y === -s.next.y) return;
+  s.next = dir;
+}
+
+/** Advance exactly one cell. A dead snake is inert: a late frame must not restart the run. */
+export function step(s: SnakeState, rand: (n: number) => number): void {
+  if (!s.alive) return;
+  s.dir = s.next;
+
+  const head = { x: s.body[0]!.x + s.dir.x, y: s.body[0]!.y + s.dir.y };
+
+  if (head.x < 0 || head.y < 0 || head.x >= s.cols || head.y >= s.rows) { s.alive = false; return; }
+
+  const ate = head.x === s.apple.x && head.y === s.apple.y;
+
+  // The tail cell is only an obstacle when the snake is growing; otherwise it moves out of the way in
+  // this very step, and treating it as solid is the classic false death every Snake gets wrong once.
+  const solid = ate ? s.body : s.body.slice(0, -1);
+  if (solid.some((c) => c.x === head.x && c.y === head.y)) { s.alive = false; return; }
+
+  s.body.unshift(head);
+  if (ate) { s.score++; s.apple = placeApple(s, rand); } else { s.body.pop(); }
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run --project node games/arcade-classico/snake`
+Expected: PASS, 15 tests.
+
+- [ ] **Step 5: Write `games/arcade-classico/snake/strings.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Snake's own strings. Registered under the slug when this chunk loads, so no other game downloads
+// them and no other game's keys collide with these.
+import type { GameStrings } from '../../../engine/core/i18n.js';
+
+export const strings: GameStrings = {
+  pt: {
+    title: 'Snake',
+    start: 'Use as setas ou WASD para mover.',
+    ate: '{score} maçãs',
+    gameOver: 'Você bateu. {score} maçãs.',
+  },
+  en: {
+    title: 'Snake',
+    start: 'Use the arrows or WASD to move.',
+    ate: '{score} apples',
+    gameOver: 'You crashed. {score} apples.',
+  },
+  es: {
+    title: 'Snake',
+    start: 'Usa las flechas o WASD para moverte.',
+    ate: '{score} manzanas',
+    gameOver: 'Chocaste. {score} manzanas.',
+  },
+};
+```
+
+- [ ] **Step 6: Write `games/arcade-classico/snake/main.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Snake — the reference game. Thin by design: rules live in rules.ts, and everything accessible
+// (contrast, colour-vision filters, screen-reader regions, pause, scaling) comes from the shell.
+//
+// The accessibility cost of this file is three things and nothing else: role tags on the four sprite
+// kinds, a dictionary in three languages, and four srSay calls. That is the budget every other game
+// in the collection is meant to fit into.
+import type { Sprite } from 'pixi.js';
+import type { GameContext, GameMeta } from '../../../engine/shell/boot.js';
+import { LOGICAL_H, LOGICAL_W } from '../../../engine/core/constants.js';
+import { createSnake, step, turn, type SnakeState } from './rules.js';
+import { strings } from './strings.js';
+
+export { strings };
+
+export const meta: GameMeta = {
+  slug: 'snake',
+  title: 'Snake',
+  category: 'arcade-classico',
+  density: 'leve',
+  players: 1,
+};
+
+const CELL = 8;
+const COLS = Math.floor(LOGICAL_W / CELL);          // 40
+const ROWS = Math.floor(LOGICAL_H / CELL);          // 22
+const OFFSET_Y = Math.floor((LOGICAL_H - ROWS * CELL) / 2);
+/** Frames between cell advances. dt is in frames, so this is a count, never milliseconds. */
+const FRAMES_PER_STEP = 6;
+
+let ctx: GameContext;
+let state: SnakeState;
+let accum = 0;
+let segments: Sprite[] = [];
+let apple: Sprite | null = null;
+let over = false;
+
+const block = (role: 'player' | 'pickup'): Sprite =>
+  ctx.sprites.make({
+    role,
+    w: CELL, h: CELL,
+    // The requested colours are what the game looks like with contrast OFF. With contrast on the
+    // engine replaces them by role and keeps this silhouette.
+    paint: (px) => px(1, 1, CELL - 2, CELL - 2, role === 'player' ? '#b8ff3d' : '#ff2d8e'),
+  });
+
+function place(s: Sprite, cx: number, cy: number): void {
+  s.x = cx * CELL;
+  s.y = cy * CELL + OFFSET_Y;
+}
+
+function syncSprites(): void {
+  while (segments.length < state.body.length) {
+    const s = block('player');
+    ctx.stage.addChild(s);
+    segments.push(s);
+  }
+  while (segments.length > state.body.length) ctx.stage.removeChild(segments.pop()!);
+  state.body.forEach((c, i) => place(segments[i]!, c.x, c.y));
+  if (apple) place(apple, state.apple.x, state.apple.y);
+}
+
+export function setup(c: GameContext): void {
+  ctx = c;
+  over = false;
+  accum = 0;
+  segments = [];
+  state = createSnake(COLS, ROWS, (n) => ctx.rng.randInt(0, n - 1));
+
+  apple = block('pickup');
+  ctx.stage.addChild(apple);
+  syncSprites();
+
+  ctx.srSay(ctx.t('start'));
+}
+
+export function update(dt: number): void {
+  if (over) return;
+
+  if (ctx.input.pressed(0, 'up')) turn(state, { x: 0, y: -1 });
+  if (ctx.input.pressed(0, 'down')) turn(state, { x: 0, y: 1 });
+  if (ctx.input.pressed(0, 'left')) turn(state, { x: -1, y: 0 });
+  if (ctx.input.pressed(0, 'right')) turn(state, { x: 1, y: 0 });
+
+  accum += dt;
+  if (accum < FRAMES_PER_STEP) return;
+  accum -= FRAMES_PER_STEP;
+
+  const before = state.score;
+  step(state, (n) => ctx.rng.randInt(0, n - 1));
+  syncSprites();
+
+  if (state.score !== before) {
+    ctx.audio.beep(880, 40);
+    ctx.srSay(ctx.t('ate', { score: state.score }));
+  }
+
+  if (!state.alive) {
+    over = true;
+    ctx.audio.beep(110, 240);
+    ctx.srAlert(ctx.t('gameOver', { score: state.score }));
+    ctx.onGameOver(state.score);
+  }
+}
+
+export function teardown(): void {
+  for (const s of segments) ctx.stage.removeChild(s);
+  if (apple) ctx.stage.removeChild(apple);
+  segments = [];
+  apple = null;
+}
+```
+
+- [ ] **Step 7: Run the boot tests that were failing in Task 12**
+
+Run: `npx vitest run --project browser engine/shell/boot.browser.test.ts`
+Expected: PASS, all 7 — the two "boots a real game" cases now find Snake.
+
+- [ ] **Step 8: Run the whole suite and typecheck**
+
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: no typecheck output; every test passes.
+
+- [ ] **Step 9: See it actually run**
+
+Run: `npm run build && npm run preview`
+Then open `http://localhost:4173/play.html#arcade-classico/snake`.
+
+Confirm by looking, not by assuming:
+- the snake moves and turns with both the arrows and WASD;
+- eating an apple lengthens it and the score in the header rises;
+- hitting a wall stops the game;
+- `Escape` opens the pause dialog and `Tab` cycles inside it without escaping;
+- in the console, `__demos.contrast.set(7)` repaints the snake and the apple into the high-contrast palette, with a white outline on each block.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add games/arcade-classico/snake/
+git commit -m "feat: add Snake, the first reference game
+
+Establishes the shape every later game copies: pure rules tested in node, a
+three-locale dictionary, and a main.ts that only renders and reads input. Its
+entire accessibility cost is four role tags, one dictionary and four srSay
+calls."
+```
+
+---
