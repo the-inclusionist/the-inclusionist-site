@@ -1648,3 +1648,716 @@ and only codes the current scheme owns get preventDefault."
 ```
 
 ---
+
+### Task 7: Canvas primitives and the scaled PixiJS mount
+
+**Files:**
+- Create: `engine/render/canvas.ts`, `engine/render/mount.ts`
+- Test: `engine/render/canvas.browser.test.ts`, `engine/render/mount.browser.test.ts`
+
+**Interfaces:**
+- Consumes: `LOGICAL_W`, `LOGICAL_H` from Task 1.
+- Produces:
+  - From `canvas.ts`: `makeCanvas(w, h)`, `tex(cv)`, `pixDisc(ctx, cx, cy, r, col, edge?)`, `type PixelBrush`, `type PixelPainter`, `pixelCanvas(w, h, paint)`, `pixelTexture(w, h, paint)`.
+  - From `mount.ts`: `mountPixi(host: HTMLElement): { app: PIXI.Application; stage: PIXI.Container; resize(): void; destroy(): void }` and `integerScale(hostW, hostH): number`.
+
+> `canvas.ts` is lifted from `<TRACER>/app/js/render/canvas.ts` with the header translated. `mount.ts`
+> is new: the tracer scales through CSS on `.pixi-mount`, which works for one game but leaves the scale
+> factor implicit. Here the factor is a tested function, because "never fractional" is a constraint the
+> plan asserts and an untested constraint is a wish.
+
+- [ ] **Step 1: Copy `canvas.ts` from the tracer**
+
+Copy `<TRACER>/app/js/render/canvas.ts` to `engine/render/canvas.ts` verbatim, translating the header
+comment to English. Keep `makeCanvas`, `tex`, `pixDisc`, `PixelBrush`, `PixelPainter`, `pixelCanvas`
+and `pixelTexture` exactly as they are — every game's art goes through `pixelCanvas`.
+
+- [ ] **Step 2: Write the failing tests**
+
+`engine/render/canvas.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { makeCanvas, pixelCanvas } from './canvas.js';
+
+/** Read one pixel as [r,g,b,a]. */
+function at(cv: HTMLCanvasElement, x: number, y: number): number[] {
+  return [...cv.getContext('2d')!.getImageData(x, y, 1, 1).data];
+}
+
+describe('canvas primitives', () => {
+  it('makes a canvas of the exact size asked for', () => {
+    const cv = makeCanvas(7, 3);
+    expect([cv.width, cv.height]).toEqual([7, 3]);
+  });
+
+  it('pixelCanvas paints where the brush is told to', () => {
+    const cv = pixelCanvas(4, 4, (px) => px(1, 1, 2, 2, '#ff0000'));
+    expect(at(cv, 0, 0)[3]).toBe(0);         // untouched stays transparent
+    expect(at(cv, 1, 1).slice(0, 3)).toEqual([255, 0, 0]);
+    expect(at(cv, 2, 2).slice(0, 3)).toEqual([255, 0, 0]);
+    expect(at(cv, 3, 3)[3]).toBe(0);
+  });
+
+  it('pixelCanvas leaves an unpainted canvas fully transparent', () => {
+    const cv = pixelCanvas(2, 2, () => { /* paints nothing */ });
+    expect(at(cv, 0, 0)[3]).toBe(0);
+  });
+
+  it('later brush strokes paint over earlier ones', () => {
+    const cv = pixelCanvas(2, 2, (px) => { px(0, 0, 2, 2, '#ff0000'); px(0, 0, 1, 1, '#0000ff'); });
+    expect(at(cv, 0, 0).slice(0, 3)).toEqual([0, 0, 255]);
+    expect(at(cv, 1, 1).slice(0, 3)).toEqual([255, 0, 0]);
+  });
+});
+```
+
+`engine/render/mount.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { afterEach, describe, expect, it } from 'vitest';
+import { integerScale, mountPixi } from './mount.js';
+import { LOGICAL_H, LOGICAL_W } from '../core/constants.js';
+
+let teardown: (() => void) | null = null;
+afterEach(() => { teardown?.(); teardown = null; document.body.innerHTML = ''; });
+
+describe('integerScale', () => {
+  it('is exactly 4 on a 1280x720 host', () => {
+    expect(integerScale(1280, 720)).toBe(4);
+  });
+
+  it('is exactly 6 on a 1920x1080 host', () => {
+    expect(integerScale(1920, 1080)).toBe(6);
+  });
+
+  it('rounds DOWN rather than producing a fractional factor', () => {
+    expect(integerScale(1279, 719)).toBe(3);
+    expect(integerScale(1000, 1000)).toBe(3);
+  });
+
+  it('is limited by the tighter axis', () => {
+    expect(integerScale(4000, 400)).toBe(2);   // height allows 2, width would allow 12
+  });
+
+  it('never drops below 1, even on a host smaller than the logical canvas', () => {
+    expect(integerScale(100, 50)).toBe(1);
+    expect(integerScale(0, 0)).toBe(1);
+  });
+
+  it('always returns a whole number', () => {
+    for (const [w, h] of [[1366, 768], [1440, 900], [800, 600], [2560, 1440]]) {
+      expect(Number.isInteger(integerScale(w!, h!))).toBe(true);
+    }
+  });
+});
+
+describe('mountPixi', () => {
+  it('creates a canvas at the logical resolution, not the host resolution', () => {
+    const host = document.createElement('div');
+    Object.defineProperty(host, 'clientWidth', { value: 1280 });
+    Object.defineProperty(host, 'clientHeight', { value: 720 });
+    document.body.appendChild(host);
+    const m = mountPixi(host);
+    teardown = () => m.destroy();
+    const cv = host.querySelector('canvas')!;
+    expect(cv.width).toBe(LOGICAL_W);
+    expect(cv.height).toBe(LOGICAL_H);
+  });
+
+  it('sizes the canvas on screen by a whole multiple of the logical size', () => {
+    const host = document.createElement('div');
+    Object.defineProperty(host, 'clientWidth', { value: 1280 });
+    Object.defineProperty(host, 'clientHeight', { value: 720 });
+    document.body.appendChild(host);
+    const m = mountPixi(host);
+    teardown = () => m.destroy();
+    const cv = host.querySelector('canvas')!;
+    expect(cv.style.width).toBe(`${LOGICAL_W * 4}px`);
+    expect(cv.style.height).toBe(`${LOGICAL_H * 4}px`);
+  });
+
+  it('asks the browser not to smooth the upscale', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const m = mountPixi(host);
+    teardown = () => m.destroy();
+    const cv = host.querySelector('canvas')!;
+    expect(cv.style.imageRendering).toBe('pixelated');
+  });
+
+  it('removes its canvas on destroy', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const m = mountPixi(host);
+    m.destroy();
+    teardown = null;
+    expect(host.querySelector('canvas')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 3: Run the tests to verify they fail**
+
+Run: `npx vitest run --project browser engine/render/`
+Expected: FAIL — `Failed to resolve import "./mount.js"`.
+
+- [ ] **Step 4: Write `engine/render/mount.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// render/mount — puts a PixiJS application into a host element at the logical resolution, then
+// scales it up by a WHOLE number.
+//
+// The renderer always draws 320x180. Only the CSS box grows. Any fractional factor makes the browser
+// resample, and resampled pixel art is mush — one logical pixel would land on 3.7 physical ones and
+// the edges would shimmer as things move. So the factor is floored, and the canvas is centred inside
+// whatever space is left over.
+import * as PIXI from 'pixi.js';
+import { LOGICAL_H, LOGICAL_W } from '../core/constants.js';
+
+/** The largest whole multiple of the logical canvas that fits in the host. Never below 1. */
+export function integerScale(hostW: number, hostH: number): number {
+  const byWidth = Math.floor(hostW / LOGICAL_W);
+  const byHeight = Math.floor(hostH / LOGICAL_H);
+  return Math.max(1, Math.min(byWidth, byHeight));
+}
+
+export interface PixiMount {
+  app: PIXI.Application;
+  stage: PIXI.Container;
+  resize(): void;
+  destroy(): void;
+}
+
+export function mountPixi(host: HTMLElement): PixiMount {
+  const app = new PIXI.Application({
+    width: LOGICAL_W,
+    height: LOGICAL_H,
+    antialias: false,
+    resolution: 1,
+    autoDensity: false,
+    backgroundColor: 0x05070f,
+  });
+  PIXI.BaseTexture.defaultOptions.scaleMode = PIXI.SCALE_MODES.NEAREST;
+
+  const view = app.view as unknown as HTMLCanvasElement;
+  view.style.imageRendering = 'pixelated';
+  view.style.display = 'block';
+  view.style.margin = 'auto';
+  host.appendChild(view);
+
+  function resize(): void {
+    const k = integerScale(host.clientWidth, host.clientHeight);
+    view.style.width = `${LOGICAL_W * k}px`;
+    view.style.height = `${LOGICAL_H * k}px`;
+  }
+  resize();
+
+  const onWindowResize = (): void => resize();
+  window.addEventListener('resize', onWindowResize);
+
+  return {
+    app,
+    stage: app.stage,
+    resize,
+    destroy() {
+      window.removeEventListener('resize', onWindowResize);
+      app.destroy(true, { children: true, texture: true, baseTexture: true });
+      view.remove();
+    },
+  };
+}
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `npx vitest run --project browser engine/render/`
+Expected: PASS. `canvas` 4, `mount` 10.
+
+- [ ] **Step 6: Run typecheck**
+
+Run: `npx tsc --noEmit`
+Expected: no output, exit 0.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add engine/render/canvas.ts engine/render/canvas.browser.test.ts engine/render/mount.ts engine/render/mount.browser.test.ts
+git commit -m "feat: add canvas primitives and the integer-scaled PixiJS mount
+
+canvas.ts is the tracer's, unchanged. mount.ts is new: the scale factor is a
+tested function rather than an implicit CSS rule, because 'never fractional'
+is a constraint and an untested constraint is a wish."
+```
+
+---
+
+### Task 8: High contrast by sprite role
+
+**Files:**
+- Create: `engine/render/high-contrast.ts`, `engine/render/sprites.ts`
+- Test: `engine/render/high-contrast.test.ts`, `engine/render/sprites.browser.test.ts`
+
+**Interfaces:**
+- Consumes: `pixelCanvas`, `tex` from Task 7.
+- Produces:
+  - From `high-contrast.ts`: `type SpriteRole`, `type ContrastLevel`, `relativeLuminance(hex)`, `contrastRatio(a, b)`, `roleColor(role, level)`, `outlineColor(level)`, `HC_BG`, `getContrastLevel()`, `setContrastLevel(level)`, `onContrastChange(fn)`.
+  - From `sprites.ts`: `roleCanvas(spec, level)`, `makeSpriteApi(stage)` returning `{ make(spec), repaintAll(), clear() }`.
+
+> This is the task the whole per-game economy rests on. A game says what a thing *means*
+> (`role: 'hazard'`) and never writes contrast code. When the player raises the contrast level, the
+> engine repaints every registered sprite: the game's own `paint` still draws the silhouette, but every
+> colour it asks for is replaced by the role's colour, and a one-pixel outline is added so adjacent
+> roles never merge into one blob.
+>
+> The colours are not hand-picked hex values hoping to be contrasty. Each role has a hue, and the
+> lightness is searched until the colour hits the exact WCAG luminance the level demands. The test then
+> measures the real ratio — if a colour fails 4.5:1, the suite fails.
+
+- [ ] **Step 1: Write the failing test**
+
+`engine/render/high-contrast.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import {
+  contrastRatio, getContrastLevel, HC_BG, onContrastChange, outlineColor,
+  relativeLuminance, roleColor, setContrastLevel, type ContrastLevel, type SpriteRole,
+} from './high-contrast.js';
+
+const PAINTED: SpriteRole[] = ['player', 'ally', 'hazard', 'goal', 'pickup', 'ui', 'neutral'];
+const LEVELS: ContrastLevel[] = [3, 4.5, 7];
+
+describe('luminance and ratio', () => {
+  it('puts black at 0 and white at 1', () => {
+    expect(relativeLuminance('#000000')).toBeCloseTo(0, 6);
+    expect(relativeLuminance('#ffffff')).toBeCloseTo(1, 6);
+  });
+
+  it('gives the textbook 21:1 for black on white', () => {
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 2);
+  });
+
+  it('is symmetric', () => {
+    expect(contrastRatio('#123456', '#abcdef')).toBeCloseTo(contrastRatio('#abcdef', '#123456'), 10);
+  });
+
+  it('gives 1:1 for a colour against itself', () => {
+    expect(contrastRatio('#3366aa', '#3366aa')).toBeCloseTo(1, 10);
+  });
+
+  it('accepts shorthand hex', () => {
+    expect(relativeLuminance('#fff')).toBeCloseTo(1, 6);
+  });
+});
+
+describe('roleColor', () => {
+  it('returns null when contrast is off, so the game keeps its own art', () => {
+    for (const r of PAINTED) expect(roleColor(r, 0)).toBeNull();
+  });
+
+  it('MEETS the ratio its level promises, for every painted role', () => {
+    for (const level of LEVELS) {
+      for (const role of PAINTED) {
+        const c = roleColor(role, level)!;
+        expect(c, `${role} at ${level}`).toMatch(/^#[0-9a-f]{6}$/);
+        expect(contrastRatio(c, HC_BG), `${role} at ${level}`).toBeGreaterThanOrEqual(level - 0.05);
+      }
+    }
+  });
+
+  it('recesses the background role instead of raising it', () => {
+    const bg = roleColor('bg', 7)!;
+    expect(contrastRatio(bg, HC_BG)).toBeLessThan(3);
+  });
+
+  it('keeps every painted role distinguishable from every other at the same level', () => {
+    for (const level of LEVELS) {
+      const seen = new Map<string, SpriteRole>();
+      for (const role of PAINTED) {
+        const c = roleColor(role, level)!;
+        expect(seen.has(c), `${role} duplicates ${seen.get(c)} at ${level}`).toBe(false);
+        seen.set(c, role);
+      }
+    }
+  });
+
+  it('is deterministic', () => {
+    expect(roleColor('hazard', 4.5)).toBe(roleColor('hazard', 4.5));
+  });
+
+  it('gives an outline that contrasts with the background at every level', () => {
+    for (const level of LEVELS) {
+      expect(contrastRatio(outlineColor(level), HC_BG)).toBeGreaterThanOrEqual(3);
+    }
+  });
+});
+
+describe('contrast level state', () => {
+  it('starts off', () => {
+    setContrastLevel(0);
+    expect(getContrastLevel()).toBe(0);
+  });
+
+  it('notifies subscribers on change and not on a no-op set', () => {
+    setContrastLevel(0);
+    let calls = 0;
+    const off = onContrastChange(() => calls++);
+    setContrastLevel(4.5);
+    expect(calls).toBe(1);
+    setContrastLevel(4.5);
+    expect(calls).toBe(1);
+    off();
+    setContrastLevel(7);
+    expect(calls).toBe(1);
+    setContrastLevel(0);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run --project node engine/render/high-contrast.test.ts`
+Expected: FAIL — `Failed to resolve import "./high-contrast.js"`.
+
+- [ ] **Step 3: Write `engine/render/high-contrast.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// render/high-contrast — semantic roles resolved to colours that MEET a stated WCAG ratio.
+//
+// This inverts what the tracer does. There, contrast was retrofitted onto a finished platformer, so
+// the colour-blocking is welded to that game's four entities. Here every sprite is born through one
+// factory, so it can carry a role tag from the start and no game ever writes contrast code.
+//
+// The colours are computed, not chosen. Each role owns a hue; the lightness is searched until the
+// colour's relative luminance is exactly what the target ratio requires against the backdrop. That
+// makes the promise checkable, and the test checks it.
+
+export type SpriteRole = 'player' | 'ally' | 'hazard' | 'goal' | 'pickup' | 'bg' | 'ui' | 'neutral';
+/** 0 = off (the game's own art). Otherwise the WCAG contrast ratio the palette must meet. */
+export type ContrastLevel = 0 | 3 | 4.5 | 7;
+
+/** The backdrop every ratio is measured against. High contrast forces the field to this colour. */
+export const HC_BG = '#000000';
+
+/** Hue and saturation per role. `ui` and `neutral` are greys, distinguished by lightness alone. */
+const ROLE_HS: Record<Exclude<SpriteRole, 'bg'>, { h: number; s: number }> = {
+  player: { h: 210, s: 1 },     // blue — the thing you are
+  ally: { h: 150, s: 1 },       // green — safe
+  hazard: { h: 0, s: 1 },       // red — kills you
+  goal: { h: 45, s: 1 },        // amber — where you are going
+  pickup: { h: 300, s: 1 },     // magenta — take it
+  ui: { h: 0, s: 0 },           // white-ish — chrome, never gameplay
+  neutral: { h: 180, s: 0.35 }, // desaturated cyan — scenery that still needs to be seen
+};
+
+/** The background role is RECESSED: it must not compete with anything the player must react to. */
+const BG_RECESSED = '#0b0b12';
+
+function hexToRgb(hex: string): [number, number, number] {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!;
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+const toHex = (n: number): string => Math.round(n).toString(16).padStart(2, '0');
+
+/** WCAG 2.x relative luminance. */
+export function relativeLuminance(hex: string): number {
+  const lin = hexToRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+/** WCAG 2.x contrast ratio, always >= 1 and order-independent. */
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a), lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const seg = Math.floor(h / 60) % 6;
+  const [r, g, b] = ([[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]] as const)[seg]!;
+  return `#${toHex((r + m) * 255)}${toHex((g + m) * 255)}${toHex((b + m) * 255)}`;
+}
+
+/**
+ * The lightness at which this hue reaches the luminance the ratio demands.
+ * Luminance rises monotonically with HSL lightness, so a bisection always converges — and at l = 1
+ * every hue is white, whose luminance is 1, so no target below 1 can be out of reach.
+ */
+function solveLightness(h: number, s: number, targetLum: number): number {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (relativeLuminance(hslToHex(h, s, mid)) < targetLum) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+const cache = new Map<string, string>();
+
+/**
+ * The colour this role must be painted at this contrast level, or null when contrast is off.
+ * Against a black backdrop the ratio R needs luminance (0.05R - 0.05), which is what is solved for.
+ */
+export function roleColor(role: SpriteRole, level: ContrastLevel): string | null {
+  if (level === 0) return null;
+  if (role === 'bg') return BG_RECESSED;
+  const key = `${role}:${level}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const { h, s } = ROLE_HS[role];
+  const target = 0.05 * level - 0.05 + relativeLuminance(HC_BG);
+  const out = hslToHex(h, s, solveLightness(h, s, target));
+  cache.set(key, out);
+  return out;
+}
+
+/** The one-pixel border drawn around every shape so two adjacent roles never read as one blob. */
+export function outlineColor(_level: ContrastLevel): string { return '#ffffff'; }
+
+let level: ContrastLevel = 0;
+const listeners = new Set<() => void>();
+
+export function getContrastLevel(): ContrastLevel { return level; }
+
+/** Set the level and notify. A no-op set does not notify — repainting every sprite is not free. */
+export function setContrastLevel(next: ContrastLevel): void {
+  if (next === level) return;
+  level = next;
+  for (const fn of listeners) fn();
+}
+
+/** Subscribe to level changes. Returns the unsubscribe function. */
+export function onContrastChange(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => { listeners.delete(fn); };
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run --project node engine/render/high-contrast.test.ts`
+Expected: PASS, 12 tests. Every role at every level provably meets its ratio.
+
+- [ ] **Step 5: Write the failing sprite test**
+
+`engine/render/sprites.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { afterEach, describe, expect, it } from 'vitest';
+import { Container } from 'pixi.js';
+import { makeSpriteApi, roleCanvas } from './sprites.js';
+import { roleColor, setContrastLevel } from './high-contrast.js';
+
+afterEach(() => setContrastLevel(0));
+
+const hexAt = (cv: HTMLCanvasElement, x: number, y: number): string => {
+  const d = cv.getContext('2d')!.getImageData(x, y, 1, 1).data;
+  return d[3] === 0 ? 'transparent' : `#${[d[0], d[1], d[2]].map((v) => v!.toString(16).padStart(2, '0')).join('')}`;
+};
+
+const square = { role: 'hazard' as const, w: 4, h: 4, paint: (px: (x: number, y: number, w: number, h: number, c: string) => void) => px(1, 1, 2, 2, '#00ff00') };
+
+describe('roleCanvas', () => {
+  it('keeps the game colours when contrast is off', () => {
+    const cv = roleCanvas(square, 0);
+    expect(hexAt(cv, 1, 1)).toBe('#00ff00');
+  });
+
+  it('is the size the spec asked for when contrast is off', () => {
+    const cv = roleCanvas(square, 0);
+    expect([cv.width, cv.height]).toEqual([4, 4]);
+  });
+
+  it('replaces every game colour with the role colour when contrast is on', () => {
+    const cv = roleCanvas(square, 4.5);
+    const expected = roleColor('hazard', 4.5)!;
+    // The shape is offset by one pixel because the outline grows the canvas by a border.
+    expect(hexAt(cv, 2, 2)).toBe(expected);
+  });
+
+  it('grows by one pixel of border on each side so the outline has somewhere to live', () => {
+    const cv = roleCanvas(square, 4.5);
+    expect([cv.width, cv.height]).toEqual([6, 6]);
+  });
+
+  it('draws an outline around the silhouette', () => {
+    const cv = roleCanvas(square, 4.5);
+    expect(hexAt(cv, 1, 2)).toBe('#ffffff');   // immediately left of the shape
+  });
+
+  it('leaves the area outside the outline transparent', () => {
+    const cv = roleCanvas(square, 4.5);
+    expect(hexAt(cv, 0, 0)).toBe('transparent');
+  });
+
+  it('recesses a bg-role sprite instead of brightening it', () => {
+    const cv = roleCanvas({ ...square, role: 'bg' }, 7);
+    expect(hexAt(cv, 2, 2)).toBe(roleColor('bg', 7));
+  });
+});
+
+describe('makeSpriteApi', () => {
+  it('adds nothing to the stage by itself — the game positions what it makes', () => {
+    const stage = new Container();
+    makeSpriteApi(stage);
+    expect(stage.children.length).toBe(0);
+  });
+
+  it('produces a sprite sized to the spec', () => {
+    const api = makeSpriteApi(new Container());
+    const s = api.make(square);
+    expect([s.width, s.height]).toEqual([4, 4]);
+    api.clear();
+  });
+
+  it('repaints every registered sprite when the contrast level changes', () => {
+    const api = makeSpriteApi(new Container());
+    const s = api.make(square);
+    const before = s.texture;
+    setContrastLevel(7);
+    expect(s.texture).not.toBe(before);
+    api.clear();
+  });
+
+  it('stops repainting sprites released by clear()', () => {
+    const api = makeSpriteApi(new Container());
+    const s = api.make(square);
+    api.clear();
+    const after = s.texture;
+    setContrastLevel(3);
+    expect(s.texture).toBe(after);
+  });
+});
+```
+
+- [ ] **Step 6: Run the test to verify it fails**
+
+Run: `npx vitest run --project browser engine/render/sprites.browser.test.ts`
+Expected: FAIL — `Failed to resolve import "./sprites.js"`.
+
+- [ ] **Step 7: Write `engine/render/sprites.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// render/sprites — the one factory every game's art goes through.
+//
+// A game describes a shape and says what it MEANS. It never picks contrast colours, never subscribes
+// to the accessibility settings, and never repaints. Because every sprite is registered here, raising
+// the contrast level repaints all of them at once — which is the whole reason a game costs 30 lines
+// of accessibility instead of 300.
+import { Sprite, type Container, type Texture } from 'pixi.js';
+import { pixelCanvas, tex } from './canvas.js';
+import { getContrastLevel, onContrastChange, outlineColor, roleColor, type ContrastLevel, type SpriteRole } from './high-contrast.js';
+
+export type PixelBrush = (x: number, y: number, w: number, h: number, col: string) => void;
+
+export interface SpriteSpec {
+  role: SpriteRole;
+  w: number;
+  h: number;
+  paint: (px: PixelBrush) => void;
+}
+
+/**
+ * Render one spec at one contrast level.
+ *
+ * Off: the game's own painter runs untouched.
+ *
+ * On: the painter runs three times over a canvas grown by a one-pixel border. First eight offset
+ * passes in the outline colour, which together form a sticker outline around whatever silhouette the
+ * game drew; then one centred pass in the role colour. The game's requested colours are discarded —
+ * that is the point, since two roles that happen to share a hue must not read as the same thing.
+ */
+export function roleCanvas(spec: SpriteSpec, level: ContrastLevel): HTMLCanvasElement {
+  if (level === 0) return pixelCanvas(spec.w, spec.h, spec.paint);
+
+  const fill = roleColor(spec.role, level)!;
+  const line = outlineColor(level);
+  const OFFSETS: ReadonlyArray<readonly [number, number]> = [
+    [0, 0], [2, 0], [0, 2], [2, 2], [1, 0], [0, 1], [2, 1], [1, 2],
+  ];
+
+  return pixelCanvas(spec.w + 2, spec.h + 2, (px) => {
+    for (const [ox, oy] of OFFSETS) spec.paint((x, y, w, h) => px(x + ox, y + oy, w, h, line));
+    spec.paint((x, y, w, h) => px(x + 1, y + 1, w, h, fill));
+  });
+}
+
+export interface SpriteApi {
+  make(spec: SpriteSpec): Sprite;
+  repaintAll(): void;
+  clear(): void;
+}
+
+/**
+ * Build the sprite API for one game session. `clear()` releases everything and unsubscribes, so a
+ * game that is torn down cannot leave sprites behind that repaint forever.
+ */
+export function makeSpriteApi(_stage: Container): SpriteApi {
+  const registry = new Map<Sprite, SpriteSpec>();
+
+  const paint = (spec: SpriteSpec): Texture => tex(roleCanvas(spec, getContrastLevel()));
+
+  function repaintAll(): void {
+    for (const [sprite, spec] of registry) {
+      const old = sprite.texture;
+      sprite.texture = paint(spec);
+      old.destroy(true);
+    }
+  }
+
+  const unsubscribe = onContrastChange(repaintAll);
+
+  return {
+    make(spec) {
+      const s = new Sprite(paint(spec));
+      // The border added in high-contrast mode must not shift the game's hitbox or layout, so the
+      // sprite is anchored on the shape's own top-left rather than the texture's.
+      s.anchor.set(0, 0);
+      s.width = spec.w;
+      s.height = spec.h;
+      registry.set(s, spec);
+      return s;
+    },
+    repaintAll,
+    clear() {
+      unsubscribe();
+      registry.clear();
+    },
+  };
+}
+```
+
+- [ ] **Step 8: Run the tests to verify they pass**
+
+Run: `npx vitest run engine/render/`
+Expected: PASS. `canvas` 4, `mount` 10, `high-contrast` 12, `sprites` 11.
+
+- [ ] **Step 9: Run typecheck and the full suite**
+
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: no typecheck output; every test passes.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add engine/render/high-contrast.ts engine/render/high-contrast.test.ts engine/render/sprites.ts engine/render/sprites.browser.test.ts
+git commit -m "feat: high contrast resolved from sprite role tags
+
+Each role owns a hue and the lightness is solved until the colour hits the
+luminance the target ratio demands, so the test can measure the real WCAG
+ratio rather than trust hand-picked hex. Games declare meaning; the engine
+repaints every registered sprite when the level changes."
+```
+
+---
