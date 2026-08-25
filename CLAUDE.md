@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Read this first
 
-**[docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md](docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md) is the authority.** It holds the decision table (D1–D12), the
+**[docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md](docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md) is the authority.** It holds the decision table (D1–D16), the
 architecture, what is lifted from the tracer, the phasing and the non-goals. This file is the entry
 rules and the pointers; do not duplicate the spec here — a duplicated fact rots.
 
@@ -17,7 +17,8 @@ conventions come from `SP-the-inclusionist-tracer` (sibling directory, GitLab `j
 **State as of 2026-08-25: Phase 0 is done, Phase 1 has not started.** The repository holds the
 catalog page and the spec. There is no `package.json`, no engine, no game, and therefore **no build,
 test or lint command yet** — do not invent one. Phase 1 creates the toolchain (Node 24, TypeScript,
-Vite, Vitest, PixiJS 7.4.2, `vite-plugin-pwa`), mirroring the tracer's versions.
+Vite, Vitest, PixiJS 7.4.2, `vite-plugin-pwa`), mirroring the tracer's versions. The plan for it is
+[docs/superpowers/plans/2026-08-25-phase-1-foundation.md](docs/superpowers/plans/2026-08-25-phase-1-foundation.md).
 
 ## Conventions
 
@@ -27,6 +28,20 @@ Vite, Vitest, PixiJS 7.4.2, `vite-plugin-pwa`), mirroring the tracer's versions.
 - **GPL-3.0-or-later**, with an SPDX header on every source file, as in the tracer.
 - **Atomic, frequent commits** in English. Never one giant "initial". No absolute paths in versioned files.
 - Decisions worth keeping go into the spec in the same turn they are made, not left as chat prose.
+
+## Structural rules (spec D13–D16)
+
+These came out of auditing the Phase 1 plan before writing it, and they are the reason a game costs
+about thirty lines of overhead instead of three hundred:
+
+- **No module-level mutable state in the engine.** A module that holds state exports `createX()`; the
+  composition root owns the instance. A test needing a `beforeEach` hook to undo the previous test
+  means the module is wrong, not the test.
+- **A game is a factory**: `create(ctx)` returns `{ update, teardown }`, with no `let` at module scope.
+- **`games/**` may import only `engine/game-api.ts`** and files in its own folder. `npm run lint:deps`
+  enforces it — do not relax the rule to make an import work; add what is missing to the context.
+- **No PixiJS type may appear in anything a game can see.** Games draw through `Scene`/`Handle`.
+- **The frame loop has an error boundary.** One broken game must stay distinguishable from a broken engine.
 
 ## Two inherited conventions that are easy to break
 
