@@ -2361,3 +2361,622 @@ repaints every registered sprite when the level changes."
 ```
 
 ---
+
+### Task 9: Colour-vision and low-vision filters
+
+**Files:**
+- Create: `engine/render/cvd-matrices.ts`, `engine/render/viz.ts`
+- Test: `engine/render/viz.test.ts`, `engine/render/viz.browser.test.ts`
+
+**Interfaces:**
+- Consumes: `storage` (`KEYS.viz`) from Task 2.
+- Produces:
+  - From `cvd-matrices.ts` (lifted): `type CvdKey`, `CVD_KEYS`, `CVD_MATRIX`, `CVD_SVG_ID`, `cvdMatrixValues(k)`, `installCvdFilters(host): number`.
+  - From `viz.ts`: `type VizKey`, `VIZ_MODES`, `vizFilter(key)`, `vizZoom(key)`, `getViz()`, `setViz(key, target)`, `initViz(host, target)`.
+
+> `cvd-matrices.ts` is copied verbatim from `<TRACER>/app/js/render/cvd-matrices.ts` — 120 numbers from
+> Machado 2009 (simulation) and Fidaner et al. (correction), which nobody should retype. Only the header
+> comment is translated.
+>
+> `viz.ts` is **not** the tracer's `viz-modes.ts`. That file carries pt-BR `nome`/`desc` strings inline,
+> which contradicts D10: every visible string in this project resolves through `t()`. So the mode table
+> is rewritten with i18n keys, and its sixteen tracer modes are cut to the eight that apply without a
+> game-specific renderer.
+
+- [ ] **Step 1: Copy `cvd-matrices.ts` from the tracer**
+
+Copy `<TRACER>/app/js/render/cvd-matrices.ts` to `engine/render/cvd-matrices.ts`. Translate the header
+comment to English. Change nothing else — the matrices, `CVD_SVG_ID` and `installCvdFilters` are used
+exactly as they are.
+
+- [ ] **Step 2: Add the shell i18n keys for the modes**
+
+Append to `engine/i18n/pt.ts`:
+```ts
+  'viz.none': 'Cores normais',
+  'viz.simProtan': 'Simular protanopia',
+  'viz.simDeuter': 'Simular deuteranopia',
+  'viz.simTritan': 'Simular tritanopia',
+  'viz.fixProtan': 'Corrigir para protanopia',
+  'viz.fixDeuter': 'Corrigir para deuteranopia',
+  'viz.fixTritan': 'Corrigir para tritanopia',
+  'viz.lowVision': 'Baixa visão (ampliar)',
+```
+
+Append to `engine/i18n/en.ts`:
+```ts
+  'viz.none': 'Normal colours',
+  'viz.simProtan': 'Simulate protanopia',
+  'viz.simDeuter': 'Simulate deuteranopia',
+  'viz.simTritan': 'Simulate tritanopia',
+  'viz.fixProtan': 'Correct for protanopia',
+  'viz.fixDeuter': 'Correct for deuteranopia',
+  'viz.fixTritan': 'Correct for tritanopia',
+  'viz.lowVision': 'Low vision (magnify)',
+```
+
+Append to `engine/i18n/es.ts`:
+```ts
+  'viz.none': 'Colores normales',
+  'viz.simProtan': 'Simular protanopía',
+  'viz.simDeuter': 'Simular deuteranopía',
+  'viz.simTritan': 'Simular tritanopía',
+  'viz.fixProtan': 'Corregir para protanopía',
+  'viz.fixDeuter': 'Corregir para deuteranopía',
+  'viz.fixTritan': 'Corregir para tritanopía',
+  'viz.lowVision': 'Baja visión (ampliar)',
+```
+
+- [ ] **Step 3: Write the failing node test**
+
+`engine/render/viz.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { CVD_KEYS, CVD_MATRIX, cvdMatrixValues } from './cvd-matrices.js';
+import { VIZ_MODES, vizFilter, vizZoom, type VizKey } from './viz.js';
+
+describe('cvd matrices', () => {
+  it('carries all six modes: three simulations and three corrections', () => {
+    expect(CVD_KEYS.length).toBe(6);
+    expect(CVD_KEYS.filter((k) => k.startsWith('sim-')).length).toBe(3);
+    expect(CVD_KEYS.filter((k) => k.startsWith('fix-')).length).toBe(3);
+  });
+
+  it('gives every mode a 20-value feColorMatrix', () => {
+    for (const k of CVD_KEYS) {
+      expect(CVD_MATRIX[k].length, k).toBe(20);
+      expect(cvdMatrixValues(k).split(/\s+/).length, k).toBe(20);
+    }
+  });
+
+  it('emits only finite numbers', () => {
+    for (const k of CVD_KEYS) for (const n of CVD_MATRIX[k]) expect(Number.isFinite(n)).toBe(true);
+  });
+});
+
+describe('viz modes', () => {
+  it('starts from a none mode that applies nothing', () => {
+    expect(vizFilter('none')).toBe('');
+    expect(vizZoom('none')).toBe(1);
+  });
+
+  it('lists every mode with an i18n key rather than a literal string', () => {
+    for (const m of VIZ_MODES) {
+      expect(m.i18nKey, m.key).toMatch(/^viz\./);
+      expect(m).not.toHaveProperty('nome');
+    }
+  });
+
+  it('has no duplicate keys', () => {
+    const keys = VIZ_MODES.map((m) => m.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('maps every cvd mode to an SVG filter reference', () => {
+    for (const m of VIZ_MODES.filter((x) => x.kind === 'cvd')) {
+      expect(vizFilter(m.key), m.key).toMatch(/^url\(#cvd-/);
+    }
+  });
+
+  it('magnifies only in low vision', () => {
+    expect(vizZoom('low-vision')).toBeGreaterThan(1);
+    for (const m of VIZ_MODES.filter((x) => x.key !== 'low-vision')) {
+      expect(vizZoom(m.key), m.key).toBe(1);
+    }
+  });
+
+  it('treats an unknown key as none rather than throwing', () => {
+    expect(vizFilter('nonsense' as VizKey)).toBe('');
+    expect(vizZoom('nonsense' as VizKey)).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 4: Write the failing browser test**
+
+`engine/render/viz.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { installCvdFilters } from './cvd-matrices.js';
+import { getViz, initViz, setViz } from './viz.js';
+
+let host: HTMLElement;
+let target: HTMLElement;
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', (() => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); } };
+  })());
+  document.body.innerHTML = '<div id="filters"></div><div id="region"></div>';
+  host = document.querySelector('#filters')!;
+  target = document.querySelector('#region')!;
+});
+
+describe('installCvdFilters', () => {
+  it('injects six filter definitions', () => {
+    expect(installCvdFilters(host)).toBe(6);
+    expect(host.querySelectorAll('filter').length).toBe(6);
+  });
+
+  it('does nothing and reports zero when the host is missing', () => {
+    expect(installCvdFilters(null)).toBe(0);
+  });
+});
+
+describe('viz application', () => {
+  it('applies no filter in the default mode', () => {
+    initViz(host, target);
+    expect(getViz()).toBe('none');
+    expect(target.style.filter).toBe('');
+  });
+
+  it('applies the SVG filter reference for a cvd mode', () => {
+    initViz(host, target);
+    setViz('fix-deuter', target);
+    expect(target.style.filter).toContain('url(#cvd-');
+  });
+
+  it('applies a zoom transform in low vision and removes it on return', () => {
+    initViz(host, target);
+    setViz('low-vision', target);
+    expect(target.style.transform).toContain('scale(');
+    setViz('none', target);
+    expect(target.style.transform).toBe('');
+  });
+
+  it('persists the choice and restores it on the next init', () => {
+    initViz(host, target);
+    setViz('sim-tritan', target);
+    const fresh = document.createElement('div');
+    initViz(host, fresh);
+    expect(getViz()).toBe('sim-tritan');
+    expect(fresh.style.filter).toContain('url(#cvd-');
+  });
+});
+```
+
+- [ ] **Step 5: Run both tests to verify they fail**
+
+Run: `npx vitest run engine/render/viz`
+Expected: FAIL — `Failed to resolve import "./viz.js"`.
+
+- [ ] **Step 6: Write `engine/render/viz.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// render/viz — the visual accessibility modes that cost a game nothing.
+//
+// These apply to the CANVAS ELEMENT, not to anything a game draws: a CSS filter over the whole
+// surface, plus a magnification transform. So every one of the 383 games gets colour-blindness
+// simulation, colour-blindness correction and low-vision magnification without a line of its own.
+//
+// Not the tracer's viz-modes.ts. That table carries pt-BR labels inline; here every visible string is
+// an i18n key, and the sixteen tracer modes are cut to the eight that need no game-specific renderer.
+// High contrast is NOT here — it is a repaint, not a filter, and lives in high-contrast.ts.
+import * as store from '../platform/storage.js';
+import { CVD_SVG_ID, type CvdKey } from './cvd-matrices.js';
+
+export type VizKey = 'none' | CvdKey | 'low-vision';
+
+export interface VizMode {
+  key: VizKey;
+  kind: 'none' | 'cvd' | 'zoom';
+  /** i18n key for the label. Never a literal string — see D10. */
+  i18nKey: string;
+}
+
+export const VIZ_MODES: readonly VizMode[] = [
+  { key: 'none', kind: 'none', i18nKey: 'viz.none' },
+  { key: 'sim-protan', kind: 'cvd', i18nKey: 'viz.simProtan' },
+  { key: 'sim-deuter', kind: 'cvd', i18nKey: 'viz.simDeuter' },
+  { key: 'sim-tritan', kind: 'cvd', i18nKey: 'viz.simTritan' },
+  { key: 'fix-protan', kind: 'cvd', i18nKey: 'viz.fixProtan' },
+  { key: 'fix-deuter', kind: 'cvd', i18nKey: 'viz.fixDeuter' },
+  { key: 'fix-tritan', kind: 'cvd', i18nKey: 'viz.fixTritan' },
+  { key: 'low-vision', kind: 'zoom', i18nKey: 'viz.lowVision' },
+];
+
+const BY_KEY = new Map<string, VizMode>(VIZ_MODES.map((m) => [m.key, m]));
+
+/** Magnification for low vision. 1.5 keeps the whole 320x180 field visible on a 4:3 host. */
+const LOW_VISION_ZOOM = 1.5;
+
+/** The CSS `filter` value for a mode, or '' for none. Unknown keys degrade to none. */
+export function vizFilter(key: VizKey): string {
+  const m = BY_KEY.get(key);
+  if (!m || m.kind !== 'cvd') return '';
+  return `url(#${CVD_SVG_ID[key as CvdKey]})`;
+}
+
+/** The magnification for a mode. Unknown keys degrade to 1. */
+export function vizZoom(key: VizKey): number {
+  return BY_KEY.get(key)?.kind === 'zoom' ? LOW_VISION_ZOOM : 1;
+}
+
+let current: VizKey = 'none';
+export function getViz(): VizKey { return current; }
+
+/** Apply a mode to the target element and persist the choice. */
+export function setViz(key: VizKey, target: HTMLElement): void {
+  current = BY_KEY.has(key) ? key : 'none';
+  store.set(store.KEYS.viz, current);
+  const filter = vizFilter(current);
+  const zoom = vizZoom(current);
+  target.style.filter = filter;
+  // Empty string rather than `scale(1)`: a lingering transform creates a containing block and a
+  // stacking context, which silently changes how the pause dialog above the canvas is positioned.
+  target.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+  target.style.transformOrigin = zoom === 1 ? '' : 'center center';
+}
+
+/** Boot: inject the filter definitions into `host` and restore the saved mode onto `target`. */
+export function initViz(host: Element | null, target: HTMLElement): void {
+  void host; // filters are installed by the caller via installCvdFilters; kept for call-site symmetry
+  const saved = store.get(store.KEYS.viz, null);
+  setViz(saved && BY_KEY.has(saved) ? (saved as VizKey) : 'none', target);
+}
+```
+
+- [ ] **Step 7: Run both tests to verify they pass**
+
+Run: `npx vitest run engine/render/viz`
+Expected: PASS. `viz` node 9, `viz` browser 7.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add engine/render/cvd-matrices.ts engine/render/viz.ts engine/render/viz.test.ts engine/render/viz.browser.test.ts engine/i18n/
+git commit -m "feat: add colour-vision and low-vision filters
+
+The 120 Machado/Fidaner matrices come from the tracer untouched. The mode
+table is rewritten with i18n keys instead of the tracer's inline pt-BR
+labels, and trimmed to the modes that need no game-specific renderer."
+```
+
+---
+
+### Task 10: The accessible shell and the router
+
+**Files:**
+- Create: `play.html` (replacing the Task 1 placeholder), `engine/shell/shell.css`, `engine/shell/router.ts`
+- Test: `engine/shell/router.test.ts`, `engine/shell/shell.browser.test.ts`
+
+**Interfaces:**
+- Consumes: nothing at runtime; the markup is what Tasks 5, 9 and 11 attach to.
+- Produces:
+  - `play.html` containing `#sr-status`, `#sr-alert`, `#game-region`, `#hud`, `#pause`, `#cvd-filters`, the skip link and the back link.
+  - From `router.ts`: `parseHash(hash): { category: string; slug: string } | null`, `gameLoaders(): Record<string, () => Promise<unknown>>`, `loaderFor(category, slug)`.
+
+> `#game-region` carries `role="application"` and `tabindex="0"`. `role="application"` tells a screen
+> reader to stop intercepting arrow keys and hand them to the page — without it the game is unplayable
+> for that user. It is also why the region must be a *focusable* island rather than the whole document:
+> outside it, normal reading keys must keep working.
+
+- [ ] **Step 1: Write the failing router test**
+
+`engine/shell/router.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { parseHash } from './router.js';
+
+describe('parseHash', () => {
+  it('parses a category and slug', () => {
+    expect(parseHash('#arcade-classico/snake')).toEqual({ category: 'arcade-classico', slug: 'snake' });
+  });
+
+  it('tolerates a missing leading hash', () => {
+    expect(parseHash('arcade-classico/snake')).toEqual({ category: 'arcade-classico', slug: 'snake' });
+  });
+
+  it('returns null for an empty hash, which is the shell landing on no game', () => {
+    expect(parseHash('')).toBeNull();
+    expect(parseHash('#')).toBeNull();
+  });
+
+  it('returns null when a segment is missing', () => {
+    expect(parseHash('#snake')).toBeNull();
+    expect(parseHash('#arcade-classico/')).toBeNull();
+    expect(parseHash('#/snake')).toBeNull();
+  });
+
+  it('rejects path traversal rather than trying to resolve it', () => {
+    expect(parseHash('#../../etc/passwd')).toBeNull();
+    expect(parseHash('#a/../b')).toBeNull();
+  });
+
+  it('rejects anything outside lowercase slug characters', () => {
+    expect(parseHash('#Arcade/snake')).toBeNull();
+    expect(parseHash('#arcade classico/snake')).toBeNull();
+    expect(parseHash('#arcade/snake?x=1')).toBeNull();
+  });
+
+  it('ignores extra path segments rather than guessing', () => {
+    expect(parseHash('#a/b/c')).toBeNull();
+  });
+
+  it('accepts digits and hyphens inside a slug', () => {
+    expect(parseHash('#puzzle-logico/2048-merge')).toEqual({ category: 'puzzle-logico', slug: '2048-merge' });
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project node engine/shell/router.test.ts`
+Expected: FAIL — `Failed to resolve import "./router.js"`.
+
+- [ ] **Step 3: Write `engine/shell/router.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// shell/router — hash to game, and the lazy registry of every game in the repository.
+//
+// import.meta.glob is how Vite discovers modules by pattern at build time. It produces one chunk per
+// game, so the shell downloads only the game the visitor opened. Adding a game is therefore creating
+// a folder: no registry to edit, no build config to touch.
+
+/** Slugs are lowercase letters, digits and hyphens. Nothing else — see parseHash. */
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export interface Route { category: string; slug: string }
+
+/**
+ * Parse `#category/slug`. Returns null for anything that is not exactly two valid slugs.
+ *
+ * The strictness is deliberate. This value selects a key into the glob registry, and a hash comes
+ * from whatever the visitor typed or was linked. Validating the shape here means the lookup below can
+ * never be asked to resolve `../` into something outside the games folder.
+ */
+export function parseHash(hash: string): Route | null {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (!raw) return null;
+  const parts = raw.split('/');
+  if (parts.length !== 2) return null;
+  const [category, slug] = parts as [string, string];
+  if (!SLUG.test(category) || !SLUG.test(slug)) return null;
+  return { category, slug };
+}
+
+/** Every game module in the repository, keyed by its glob path, loaded on demand. */
+export function gameLoaders(): Record<string, () => Promise<unknown>> {
+  return import.meta.glob('../../games/*/*/main.ts');
+}
+
+/** The loader for one route, or null when no such game exists. */
+export function loaderFor(category: string, slug: string): (() => Promise<unknown>) | null {
+  return gameLoaders()[`../../games/${category}/${slug}/main.ts`] ?? null;
+}
+```
+
+- [ ] **Step 4: Run the router test to verify it passes**
+
+Run: `npx vitest run --project node engine/shell/router.test.ts`
+Expected: PASS, 8 tests.
+
+- [ ] **Step 5: Write `play.html`**
+
+Replace the Task 1 placeholder entirely:
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JS Minigames</title>
+<link rel="stylesheet" href="./engine/shell/shell.css">
+</head>
+<body>
+
+<a class="skip-link" href="#game-region" data-i18n="shell.skipToGame">Pular para o jogo</a>
+
+<!-- Screen-reader live regions. Every game announces through these; none of them creates its own. -->
+<div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="sr-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- The colour-vision filter definitions are injected here at boot by installCvdFilters. -->
+<svg id="cvd-filters" aria-hidden="true" focusable="false" width="0" height="0"></svg>
+
+<header class="bar">
+  <a class="back" href="./index.html" data-i18n="shell.backToCatalog">Voltar ao catálogo</a>
+  <h1 id="game-title" class="title"></h1>
+  <p id="hud" class="hud"><span data-i18n="shell.score">Pontos</span>:
+    <strong id="hud-score" aria-live="off">0</strong></p>
+</header>
+
+<main>
+  <!--
+    role="application" makes a screen reader pass arrow keys through to the page instead of using them
+    to move its own reading cursor. Without it the game cannot be played by that user at all. It is
+    scoped to this element, never the document, so ordinary reading keys keep working everywhere else.
+  -->
+  <div id="game-region" class="game-region" role="application" tabindex="0"
+       data-i18n-aria="shell.gameRegion" aria-label="Área de jogo">
+
+    <div id="pause" class="pause" hidden>
+      <div class="pause-card" role="dialog" aria-modal="true" aria-labelledby="pause-h">
+        <h2 id="pause-h" data-i18n="shell.pause">Pausa</h2>
+        <div id="pause-menu" role="menu" data-i18n-aria="shell.pauseMenu" aria-label="Menu de pausa">
+          <button type="button" role="menuitem" data-act="resume" data-i18n="shell.resume">Continuar</button>
+          <button type="button" role="menuitem" data-act="restart" data-i18n="shell.restart">Reiniciar</button>
+          <button type="button" role="menuitem" data-act="quit" data-i18n="shell.backToCatalog">Voltar ao catálogo</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script type="module" src="./engine/shell/boot.ts"></script>
+</body>
+</html>
+```
+
+- [ ] **Step 6: Write `engine/shell/shell.css`**
+
+```css
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+:root { --bg: #0a0a12; --fg: #ececf2; --line: #2a2a40; --focus: #ffd60a; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--fg); font-family: ui-monospace, monospace; min-height: 100%; }
+
+/* Visually hidden but still read aloud. Never display:none — that removes it from the a11y tree too. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute; left: -999px; top: 0; z-index: 100;
+  background: var(--focus); color: #000; padding: 8px 16px;
+}
+.skip-link:focus { left: 0; }
+
+.bar { display: flex; align-items: baseline; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.title { font-size: 16px; }
+.hud { margin-left: auto; font-size: 14px; }
+.back { color: var(--fg); }
+
+main { display: flex; justify-content: center; padding: 16px; }
+
+.game-region { position: relative; background: #05070f; line-height: 0; }
+/* A visible focus ring is not decoration: it is how a keyboard user knows the game has their keys. */
+.game-region:focus-visible { outline: 4px solid var(--focus); outline-offset: 3px; }
+
+.pause { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; background: rgba(4, 7, 15, .82); line-height: 1.5; }
+.pause[hidden] { display: none; }
+.pause-card { padding: 16px 20px; border: 1px solid var(--line); background: var(--bg); }
+.pause-card h2 { font-size: 18px; margin-bottom: 12px; }
+#pause-menu { display: flex; flex-direction: column; gap: 6px; }
+#pause-menu button { font: inherit; padding: 6px 12px; background: #161624; color: var(--fg); border: 1px solid var(--line); cursor: pointer; }
+#pause-menu button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+```
+
+- [ ] **Step 7: Write the failing shell markup test**
+
+`engine/shell/shell.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeAll, describe, expect, it } from 'vitest';
+
+/**
+ * Loads the real play.html and asserts the accessibility contract every game inherits. This markup is
+ * written once for 383 games, so a regression here is a regression in all of them at the same time.
+ */
+let doc: Document;
+
+beforeAll(async () => {
+  const html = await (await fetch('/play.html')).text();
+  doc = new DOMParser().parseFromString(html, 'text/html');
+});
+
+describe('play.html accessibility contract', () => {
+  it('has both live regions with the right politeness', () => {
+    expect(doc.querySelector('#sr-status')!.getAttribute('aria-live')).toBe('polite');
+    expect(doc.querySelector('#sr-alert')!.getAttribute('aria-live')).toBe('assertive');
+  });
+
+  it('marks both live regions atomic, so partial updates are not read', () => {
+    for (const id of ['#sr-status', '#sr-alert']) {
+      expect(doc.querySelector(id)!.getAttribute('aria-atomic'), id).toBe('true');
+    }
+  });
+
+  it('has a skip link pointing at the game region', () => {
+    expect(doc.querySelector('.skip-link')!.getAttribute('href')).toBe('#game-region');
+  });
+
+  it('makes the game region a focusable application', () => {
+    const r = doc.querySelector('#game-region')!;
+    expect(r.getAttribute('role')).toBe('application');
+    expect(r.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('gives the game region an accessible name', () => {
+    const r = doc.querySelector('#game-region')!;
+    expect(r.getAttribute('aria-label')).toBeTruthy();
+    expect(r.getAttribute('data-i18n-aria')).toBe('shell.gameRegion');
+  });
+
+  it('makes the pause overlay a modal dialog with a label', () => {
+    const d = doc.querySelector('.pause-card')!;
+    expect(d.getAttribute('role')).toBe('dialog');
+    expect(d.getAttribute('aria-modal')).toBe('true');
+    expect(doc.querySelector(`#${d.getAttribute('aria-labelledby')}`)).not.toBeNull();
+  });
+
+  it('starts with the pause overlay hidden', () => {
+    expect(doc.querySelector('#pause')!.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('keeps the score out of the live region, so every point is not announced', () => {
+    expect(doc.querySelector('#hud-score')!.getAttribute('aria-live')).toBe('off');
+  });
+
+  it('hides the filter svg from assistive technology', () => {
+    const svg = doc.querySelector('#cvd-filters')!;
+    expect(svg.getAttribute('aria-hidden')).toBe('true');
+    expect(svg.getAttribute('focusable')).toBe('false');
+  });
+
+  it('gives every visible string an i18n key', () => {
+    const texts = [...doc.querySelectorAll('.skip-link, .back, #pause-h, #pause-menu button')];
+    expect(texts.length).toBeGreaterThan(0);
+    for (const el of texts) expect(el.getAttribute('data-i18n'), el.outerHTML).toBeTruthy();
+  });
+
+  it('declares a language on the document', () => {
+    expect(doc.documentElement.getAttribute('lang')).toBe('pt-BR');
+  });
+});
+```
+
+- [ ] **Step 8: Run the shell test**
+
+Run: `npx vitest run --project browser engine/shell/shell.browser.test.ts`
+Expected: PASS, 11 tests. (It fails first only if the markup in Step 5 was not written; write it, then run.)
+
+- [ ] **Step 9: Run typecheck and the full suite**
+
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: no typecheck output; every test passes.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add play.html engine/shell/shell.css engine/shell/router.ts engine/shell/router.test.ts engine/shell/shell.browser.test.ts
+git commit -m "feat: add the accessible shell and the hash router
+
+The markup is written once and inherited by every game: live regions, skip
+link, role=application on a focusable game region, and a modal pause dialog.
+parseHash rejects anything that is not two plain slugs, so a crafted hash can
+never reach outside the games folder."
+```
+
+---
