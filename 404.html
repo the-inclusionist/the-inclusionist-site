@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  The 404 page, and it is also the mechanism: Cloudflare Pages serves THIS FILE, with status 404, for any
+  path that matches no asset. That is the whole fix for the catch-all the old project had, where every missing
+  file came back as 200 with the catalog's HTML — which is poison for a PWA, because Workbox then caches HTML
+  under an image URL and the failure becomes invisible.
+
+  Self-contained on purpose, exactly like the catalog: one file, no JavaScript, and the Google Fonts
+  stylesheet as the only network dependency. A 404 that needs a build step is a 404 that will be broken on the
+  day it is needed.
+
+  Content is pt-BR because this is product surface (same exception the catalog carries); comments are English.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 — página não encontrada · Inclusionista</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Bungee+Shade&family=JetBrains+Mono:wght@300;400;500;700&family=Major+Mono+Display&display=swap" rel="stylesheet">
+<style>
+  /* ────────── TOKENS ────────── shared with minigames-catalog-v2.html */
+  :root {
+    --bg: #0a0a12;
+    --surface: #161624;
+    --line: #2a2a40;
+    --text: #ececf2;
+    --text-dim: #8a8aa0;
+    --c1:  #ff2d8e;
+    --c2:  #00d9ff;
+    --c3:  #b8ff3d;
+    --c4:  #ffd60a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    min-height: 100vh;
+    /* Flex rather than `display:grid; place-items:center`: with flex, `.wrap { width:100%; max-width }`
+       resolves against the container unambiguously, while `place-items:center` also sets
+       `justify-items:center`, whose interaction with a percentage width is the kind of thing that renders
+       differently than it reads. NOT verified on screen — the preview pane serves files outside the project
+       folder as static snapshots, so it returned the same image before and after the change. First real look
+       is the Cloudflare upload. */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+  }
+
+  /* ────────── LAYOUT ────────── two columns on wide screens, stacked on narrow */
+  .wrap {
+    width: 100%;
+    max-width: 1000px;
+    display: grid;
+    gap: 40px;
+    grid-template-columns: minmax(240px, 340px) 1fr;
+    align-items: center;
+  }
+  @media (max-width: 720px) {
+    .wrap { grid-template-columns: 1fr; gap: 28px; }
+  }
+
+  /* ────────── THE PENGUIN ────────── */
+  .tadeu {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+
+  /* ────────── TEXT ────────── */
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--c2);
+    border: 1px dashed var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+    display: inline-block;
+    margin-bottom: 24px;
+  }
+  h1 {
+    font-family: 'Bungee Shade', cursive;
+    font-size: clamp(64px, 12vw, 132px);
+    line-height: 0.95;
+    letter-spacing: -0.01em;
+    margin-bottom: 12px;
+  }
+  h1 span { color: var(--c1); }
+  .sub {
+    font-family: 'Major Mono Display', monospace;
+    font-size: clamp(14px, 1.6vw, 19px);
+    color: var(--text-dim);
+    letter-spacing: 0.15em;
+    text-transform: lowercase;
+    margin-bottom: 28px;
+  }
+  p {
+    color: var(--text-dim);
+    line-height: 1.7;
+    max-width: 52ch;
+    margin-bottom: 28px;
+  }
+  p strong { color: var(--text); font-weight: 500; }
+
+  /* ────────── THE WAY BACK ────────── */
+  .voltar {
+    font-family: 'Bungee', cursive;
+    font-size: 15px;
+    text-decoration: none;
+    color: var(--bg);
+    background: var(--c3);
+    padding: 12px 22px;
+    border-radius: 3px;
+    display: inline-block;
+    border: 2px solid transparent;
+  }
+  .voltar:hover { background: var(--c4); }
+  /* Focus is visible on its own terms, never only by colour: the ring survives high contrast and forced
+     colours, which a background swap does not. */
+  .voltar:focus-visible {
+    outline: 3px solid var(--c2);
+    outline-offset: 3px;
+  }
+
+  .rodape {
+    margin-top: 36px;
+    padding-top: 20px;
+    border-top: 1px dashed var(--line);
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+  }
+
+  /* No animation is declared here, so there is nothing to disable — stated rather than assumed, because the
+     next person to add a flicker to this page is the one who needs to read it. */
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <img class="tadeu" src="img/404-tadeu.jpg" width="457" height="582"
+         alt="Um pinguim visto de costas, sozinho no meio de um deserto de areia. A legenda na imagem diz: “Tadeu nunca quis estudar geografia — e hoje, ele se arrepende amargamente.”">
+
+    <div>
+      <span class="eyebrow">// erro 404</span>
+      <h1>4<span>0</span>4</h1>
+      <p class="sub">esta página não existe</p>
+
+      <p>
+        O endereço que você digitou não corresponde a nada por aqui. Pode ser um link antigo, um
+        caractere trocado — ou o Tadeu deu a direção.
+      </p>
+      <p>
+        <strong>Nada foi perdido:</strong> o catálogo continua inteiro, com todos os minijogos no lugar.
+      </p>
+
+      <a class="voltar" href="/">Voltar ao catálogo</a>
+
+      <p class="rodape">
+        Inclusionista · jogos educacionais acessíveis · software livre (AGPL-3.0)
+      </p>
+    </div>
+  </main>
+</body>
+</html>
