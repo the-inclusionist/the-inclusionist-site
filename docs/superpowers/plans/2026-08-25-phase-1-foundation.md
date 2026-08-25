@@ -4,9 +4,9 @@
 
 **Goal:** Build the engine, accessible shell and catalog generator that all 383 games inherit, proven by three reference games (Snake, Pong, Breakout).
 
-**Architecture:** A single Vite app with one shell page (`play.html`) that lazy-loads any game through `import.meta.glob`, and a generated catalog page (`index.html`) that links to it. Games are thin: they declare sprites with semantic role tags, a three-language string dictionary, and a frame-stepped `update(dt)`. Everything else — input, scaling, contrast, screen-reader announcements, pause, offline caching — lives in the engine and is written exactly once.
+**Architecture:** A single Vite app with one shell page (`play.html`) that lazy-loads any game through `import.meta.glob`, and a generated catalog page (`index.html`) that links to it. Games are thin and closed: a game is a factory that receives a `GameContext` and returns `{ update, teardown }`, draws through a renderer-agnostic `Scene`, and imports exactly one engine module. Input, scaling, contrast, screen-reader announcements, pause, language and offline caching live in the engine and are written once.
 
-**Tech Stack:** Node 24, TypeScript 5.7, Vite 8, Vitest 4 (node + browser/Playwright projects), PixiJS 7.4.2, `vite-plugin-pwa` 1.3, `@axe-core/playwright`, `node-html-parser` (one-shot import only).
+**Tech Stack:** Node 24, TypeScript 5.7, Vite 8, Vitest 4 (node + browser/Playwright projects), PixiJS 7.4.2, `vite-plugin-pwa` 1.3, `@axe-core/playwright`, `dependency-cruiser`, Prettier, `node-html-parser` (one-shot import only).
 
 **Spec:** [docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md](../specs/2026-08-25-inclusionist-demos-design.md)
 
@@ -17,7 +17,16 @@ Every task's requirements implicitly include this section.
 - **Logical canvas is exactly `320×180`, `TILE = 16`.** Never fractional scaling — it blurs pixel art.
 - **`dt` is counted in FRAMES, not seconds.** `1.0` means one 60 fps frame. Clamp at `2`.
 - **Keyboard listeners attach to `#game-region`, never to `window`.**
-- **English for every artifact**: code, comments, commit messages, docs. Exception: the catalog page's visible content (category names, subgenre names and hints) stays pt-BR.
+- **No module-level mutable state in the engine (spec D13).** A module that holds state exports a
+  `createX()` factory; the composition root owns the instance. Pure functions and frozen data may be
+  module-level. If a test needs a cleanup ritual in `beforeEach` to undo the previous test, the module
+  is wrong, not the test.
+- **A game is a factory (spec D14).** `create(ctx)` returns `{ update, teardown }`. No `let` at module
+  scope in `games/**`.
+- **`games/**` may import only `engine/game-api.ts` and files inside its own folder (spec D15).**
+  Enforced by `npm run lint:deps`, not by good intentions.
+- **English for every artifact**: code, comments, commit messages, docs. Exception: the catalog page's
+  visible content (category names, subgenre names and hints) stays pt-BR.
 - **Every source file starts with `// SPDX-License-Identifier: GPL-3.0-or-later`.**
 - **No PNG ships inside a game.** All art is procedural, painted through `pixelCanvas`.
 - **No absolute paths in versioned files.**
@@ -28,40 +37,44 @@ Every task's requirements implicitly include this section.
 
 ## File Structure
 
-| File | Responsibility |
-|---|---|
-| `engine/core/constants.ts` | `LOGICAL_W`, `LOGICAL_H`, `TILE`, `MAX_DT`. Leaf, zero deps. |
-| `engine/platform/storage.ts` | Exception-proof `localStorage` wrapper + `KEYS` registry. Leaf. |
-| `engine/ui/dom.ts` | `$`, `$$`, `toggleBtn`. Leaf, pure (touches no DOM at import). |
-| `engine/core/rng.ts` | Seeded LCG: `reseed`, `rnd`, `randInt`, `shuffle`. Leaf, pure. |
-| `engine/core/loop.ts` | `startLoop(ticker, frame, maxDt)` — clamped frame driver. Leaf. |
-| `engine/core/collision.ts` | `aabb`, `sweptAabb`. Leaf, pure. |
-| `engine/core/i18n.ts` | `t`, `scopedT`, `registerDict`, `setLocale`, `applyDom`, `bcp47`. Depends on `storage`. |
-| `engine/core/a11y-sr.ts` | `srSay`, `srAlert` against the live regions. Depends on `dom`. |
-| `engine/input/keyboard.ts` | Key schemes for `solo/p2/p3/p4`, persisted. Depends on `storage`. |
-| `engine/input/state.ts` | `keys` set, pad state, `held`. Leaf. |
-| `engine/input/latch.ts` | Edge detection: `pressed`, `released`. Leaf. |
-| `engine/input/attach.ts` | Binds listeners to `#game-region`, polls gamepads, exposes `InputApi`. |
-| `engine/render/canvas.ts` | `makeCanvas`, `tex`, `pixelCanvas`, `pixelTexture`, `pixDisc`. Depends on PixiJS. |
-| `engine/render/viz-modes.ts` | The visual accessibility mode table. Leaf, pure data. |
-| `engine/render/cvd-matrices.ts` | Colour-vision-deficiency matrices. Leaf, pure data. |
-| `engine/render/high-contrast.ts` | Role → colour resolution at 3:1 / 4.5:1 / 7:1. Leaf, pure. |
-| `engine/render/sprites.ts` | Role-tagged sprite factory + repaint registry. Depends on `canvas`, `high-contrast`. |
-| `engine/shell/a11y-regions.ts` | Mounts and drives `#sr-status` / `#sr-alert`. |
-| `engine/shell/router.ts` | Hash → `{category, slug}`, and the game registry from `import.meta.glob`. |
-| `engine/shell/hud.ts` | Score/lives strip, `aria-live="off"`. |
-| `engine/shell/pause.ts` | `role="dialog" aria-modal` pause menu, focus trap. |
-| `engine/shell/boot.ts` | Composition root: builds `GameContext`, loads a game, runs the loop. |
-| `play.html` | The accessible shell markup. One page for all games. |
-| `games/<cat>/<slug>/main.ts` | One game: `meta`, `setup`, `update`, `teardown`. |
-| `games/<cat>/<slug>/strings.ts` | One game's `pt`/`en`/`es` dictionary. |
-| `scripts/import-catalog.mts` | One-shot: `minigames-catalog-v2.html` → `data/catalog.json`. |
-| `scripts/build-catalog.mts` | `catalog.json` + template → `index.html`. |
-| `scripts/axe-check.mjs` | WCAG A/AA gate over the built shell and catalog. |
+| File | Responsibility | Shape |
+|---|---|---|
+| `engine/core/constants.ts` | `LOGICAL_W`, `LOGICAL_H`, `TILE`, `MAX_DT` | pure |
+| `engine/platform/storage.ts` | Exception-proof `localStorage` wrapper + `KEYS` | pure fns |
+| `engine/ui/dom.ts` | `$`, `$$`, `toggleBtn` | pure fns |
+| `engine/core/rng.ts` | Seeded LCG | **factory** `createRng(seed)` |
+| `engine/core/loop.ts` | Clamped frame driver | pure fn |
+| `engine/core/collision.ts` | `aabb`, `sweptAabb` | pure |
+| `engine/core/i18n.ts` | Translation, per-game dictionaries | **factory** `createI18n()` |
+| `engine/core/a11y-sr.ts` | Screen-reader announcements | **factory** `createAnnouncer(root)` |
+| `engine/input/actions.ts` | The eight actions, `KeyScheme`, pure `heldIn` | pure |
+| `engine/input/keyboard.ts` | Key schemes, load/save, `schemesFor`, `ownedCodes` | pure fns |
+| `engine/input/latch.ts` | Edge detection | **factory** `makeLatch()` |
+| `engine/input/attach.ts` | Owns key/pad state, binds to an element | **factory** `attachInput(el, players, kb)` |
+| `engine/render/canvas.ts` | `makeCanvas`, `tex`, `pixelCanvas`, `pixelTexture`, `pixDisc` | pure fns |
+| `engine/render/mount.ts` | `integerScale`, PixiJS mount | **factory** `mountPixi(host)` |
+| `engine/render/high-contrast.ts` | Role → colour at a measured WCAG ratio | pure fns + **factory** `createVisualState()` |
+| `engine/render/cvd-matrices.ts` | Machado/Fidaner matrices (lifted) | pure data |
+| `engine/render/viz.ts` | Colour-vision and low-vision modes | **factory** `createViz(target)` |
+| `engine/render/scene-pixi.ts` | The `Scene` implementation over PixiJS | **factory** `createPixiScene(stage, visual)` |
+| `engine/game-api.ts` | **The only module `games/**` may import** | types + pure helpers |
+| `engine/shell/router.ts` | `parseHash`, the lazy game registry | pure |
+| `engine/shell/hud.ts` | Title and score strip | **factory** `createHud(root)` |
+| `engine/shell/pause.ts` | Modal pause menu with a focus trap | **factory** `createPause(panel)` |
+| `engine/shell/settings.ts` | Language, contrast and colour-vision controls | **factory** `mountSettings(deps)` |
+| `engine/shell/session.ts` | One game's lifecycle: build ctx, run, tear down | **factory** `startSession(deps)` |
+| `engine/shell/boot.ts` | Composition root. Wires everything, owns every instance | entry |
+| `play.html` | The accessible shell markup | — |
+| `games/<cat>/<slug>/rules.ts` | Pure game logic, tested in the node project | pure |
+| `games/<cat>/<slug>/main.ts` | `meta`, `strings`, `create(ctx)` | **factory** |
+| `scripts/import-catalog.mts` | One-shot: HTML → `data/catalog.json` | — |
+| `scripts/build-catalog.mts` | `catalog.json` + template → `index.html` | — |
+| `scripts/axe-check.mjs` | WCAG A/AA gate over the built pages | — |
+| `.dependency-cruiser.cjs` | The D15 rule, as an executable check | — |
 
 ### Shared interfaces
 
-These names are used across tasks. Define them exactly as written.
+Define these exactly as written. They are the contract every task composes against.
 
 ```ts
 // engine/core/collision.ts
@@ -73,8 +86,9 @@ export type LocaleDict = Record<string, string>;
 export type GameStrings = { pt: LocaleDict; en: LocaleDict; es: LocaleDict };
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
 
-// engine/input/state.ts
+// engine/input/actions.ts
 export type Action = 'up' | 'left' | 'down' | 'right' | 'run' | 'jump' | 'swap' | 'especial';
+export type KeyScheme = Record<Action, string[]>;
 
 // engine/input/attach.ts
 export interface InputApi {
@@ -87,18 +101,25 @@ export interface InputApi {
 export type SpriteRole = 'player' | 'ally' | 'hazard' | 'goal' | 'pickup' | 'bg' | 'ui' | 'neutral';
 export type ContrastLevel = 0 | 3 | 4.5 | 7;   // 0 = off
 
-// engine/render/sprites.ts
+// engine/render/scene-pixi.ts — the drawing contract, renderer-agnostic BY DESIGN
 export interface SpriteSpec {
   role: SpriteRole;
   w: number; h: number;
   paint: (px: (x: number, y: number, w: number, h: number, col: string) => void) => void;
 }
+/** An opaque drawable. A game moves and hides it; it cannot reach the renderer through it. */
+export interface Handle { x: number; y: number; visible: boolean }
+export interface Scene {
+  add(spec: SpriteSpec): Handle;
+  remove(h: Handle): void;
+  clear(): void;
+}
 
-// engine/shell/boot.ts — what every game receives
+// engine/game-api.ts — the whole surface a game sees
 export interface GameContext {
-  stage: import('pixi.js').Container;
+  scene: Scene;
+  view: { w: number; h: number; tile: number };
   input: InputApi;
-  sprites: { make(spec: SpriteSpec): import('pixi.js').Sprite };
   audio: { beep(freq: number, ms: number): void };
   rng: { rnd(): number; randInt(lo: number, hi: number): number; reseed(s: number): void };
   storage: { get(k: string, f?: string | null): string | null; set(k: string, v: string | number | boolean): boolean };
@@ -107,8 +128,6 @@ export interface GameContext {
   srAlert(text: string): void;
   onGameOver(score: number): void;
 }
-
-// The game contract
 export interface GameMeta {
   slug: string; title: string; category: string;
   density: 'leve' | 'medio' | 'denso';
@@ -116,27 +135,35 @@ export interface GameMeta {
   renderer?: 'pixel' | 'svg' | '3d';
   rendererWhy?: string;
 }
+export interface GameInstance { update(dt: number): void; teardown(): void }
 export interface GameModule {
   meta: GameMeta;
   strings: GameStrings;
-  setup(ctx: GameContext): void;
-  update(dt: number): void;
-  teardown(): void;
+  create(ctx: GameContext): GameInstance;
 }
 ```
 
+> [!warning] Three conventions that are easy to break
+> **`dt` is counted in frames, not seconds** — physics copied from a seconds-based tutorial runs wrong.
+> **The keyboard is listened to on `#game-region`, not on `window`** — on `window` the game steals the page's keys.
+> **`PIXI` must not appear in any type a game can see** — the moment it does, 383 games are pinned to one renderer.
+
 ---
 
-### Task 1: Toolchain and engine constants
+### Task 1: Toolchain, formatting and engine constants
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `vite.config.ts`, `.node-version`
+- Create: `package.json`, `tsconfig.json`, `vite.config.ts`, `.node-version`, `.editorconfig`, `.prettierrc.json`, `.prettierignore`
 - Create: `engine/core/constants.ts`
 - Test: `engine/core/constants.test.ts`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `LOGICAL_W: 320`, `LOGICAL_H: 180`, `TILE: 16`, `MAX_DT: 2` from `engine/core/constants.ts`. The npm scripts `dev`, `build`, `preview`, `typecheck`, `test`, `test:node`, `test:browser`.
+- Produces: `LOGICAL_W: 320`, `LOGICAL_H: 180`, `TILE: 16`, `MAX_DT: 2`. The npm scripts `dev`, `build`, `preview`, `typecheck`, `test`, `test:node`, `test:browser`, `format`, `format:check`.
+
+> Formatting is automated from the first commit rather than added later. This repository will receive
+> hundreds of contributions across separate sessions; without a formatter, half of every future diff is
+> whitespace, and reviewers spend attention on nothing.
 
 - [ ] **Step 1: Create the toolchain files**
 
@@ -163,24 +190,66 @@ export interface GameModule {
     "test": "vitest run",
     "test:node": "vitest run --project node",
     "test:browser": "vitest run --project browser",
-    "validate": "npm run typecheck && vitest run && vite build"
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "validate": "npm run format:check && npm run typecheck && vitest run && npm run build"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",
     "@types/node": "^22.0.0",
     "@vitest/browser": "^4.0.0",
     "@vitest/browser-playwright": "^4.0.0",
+    "dependency-cruiser": "^16.0.0",
     "node-html-parser": "^6.1.13",
     "pixi.js": "7.4.2",
     "playwright": "^1.49.0",
+    "prettier": "^3.4.0",
     "typescript": "^5.7.0",
     "vite": "^8.0.0",
     "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "wait-on": "^8.0.0"
   },
   "overrides": { "vite-plugin-pwa": { "vite": "$vite" } }
 }
 ```
+
+`.editorconfig`:
+```ini
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false
+```
+
+`.prettierrc.json`:
+```json
+{
+  "printWidth": 110,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "arrowParens": "always"
+}
+```
+
+`.prettierignore`:
+```
+node_modules/
+dist/
+index.html
+data/catalog.json
+```
+
+> `index.html` and `data/catalog.json` are generated. Formatting generated files means the formatter
+> and the generator fight, and the diff is never clean.
 
 `tsconfig.json`:
 ```json
@@ -205,7 +274,10 @@ export interface GameModule {
 }
 ```
 
-`vite.config.ts` (PWA is added in Task 16 — do not add it now):
+> `noUnusedParameters` is on deliberately. It is what would have caught the unused `host` parameter
+> that the plan audit found — a parameter kept "for symmetry" is a lie in an interface.
+
+`vite.config.ts` (PWA arrives in Task 19 — do not add it now):
 ```ts
 import { defineConfig } from 'vite';
 import { playwright } from '@vitest/browser-playwright';
@@ -247,12 +319,11 @@ export default defineConfig({
 });
 ```
 
-> The `input` map names `index.html` and `play.html`, which do not exist yet. Create both as
-> one-line placeholders now so `vite build` resolves — Task 9 replaces `play.html` and Task 15
-> generates `index.html`.
->
-> `index.html`: `<!doctype html><title>catalog placeholder</title>`
-> `play.html`: `<!doctype html><title>play placeholder</title>`
+Create both entry pages as placeholders so `vite build` resolves. Task 10 replaces `play.html`;
+Task 17 generates `index.html`.
+
+`index.html`: `<!doctype html><title>catalog placeholder</title>`
+`play.html`: `<!doctype html><title>play placeholder</title>`
 
 - [ ] **Step 2: Install dependencies**
 
@@ -307,9 +378,9 @@ Expected: FAIL — `Failed to resolve import "./constants.js"`.
 // SPDX-License-Identifier: GPL-3.0-or-later
 // core/constants — the numbers every other module derives from. Leaf, zero deps.
 //
-// 320x180 is exactly 16:9, which is why it integer-scales onto 1280x720 (x4) and 1920x1080 (x6)
-// with no letterboxing and no fractional pixels. Any other logical size reintroduces blur on the
-// most common displays, so this pair is not a preference.
+// 320x180 is exactly 16:9, which is why it integer-scales onto 1280x720 (x4) and 1920x1080 (x6) with
+// no letterboxing and no fractional pixels. Any other logical size reintroduces blur on the most
+// common displays, so this pair is not a preference.
 export const LOGICAL_W = 320;
 export const LOGICAL_H = 180;
 export const TILE = 16;
@@ -320,21 +391,23 @@ export const TILE = 16;
 export const MAX_DT = 2;
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [ ] **Step 6: Run the test, the typecheck and the formatter**
 
 Run: `npx vitest run --project node engine/core/constants.test.ts`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 7: Run typecheck**
+Run: `npx tsc --noEmit && npm run format`
+Expected: no typecheck output; Prettier rewrites what it needs to.
 
-Run: `npx tsc --noEmit`
-Expected: no output, exit 0.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add package.json package-lock.json tsconfig.json vite.config.ts .node-version index.html play.html engine/core/constants.ts engine/core/constants.test.ts
-git commit -m "feat: set up the toolchain and lock the logical canvas at 320x180"
+git add package.json package-lock.json tsconfig.json vite.config.ts .node-version .editorconfig .prettierrc.json .prettierignore index.html play.html engine/core/constants.ts engine/core/constants.test.ts
+git commit -m "chore: set up the toolchain and lock the logical canvas at 320x180
+
+Prettier and EditorConfig from the first commit rather than later: this repo
+will take hundreds of contributions across separate sessions, and retrofitting
+a formatter makes one diff that touches everything."
 ```
 
 ---
@@ -346,23 +419,25 @@ git commit -m "feat: set up the toolchain and lock the logical canvas at 320x180
 - Test: `engine/core/rng.test.ts`, `engine/core/loop.test.ts`, `engine/platform/storage.test.ts`
 
 **Interfaces:**
-- Consumes: nothing.
+- Consumes: `MAX_DT` from Task 1.
 - Produces:
-  - `storage`: `get(key, fallback?)`, `set(key, value)`, `remove(key)`, `getBool`, `setBool`, `getNum`, `getJSON<T>`, `setJSON`, `KEYS`.
+  - `storage`: `get`, `set`, `remove`, `getBool`, `setBool`, `getNum`, `getJSON<T>`, `setJSON`, `KEYS`.
   - `dom`: `$<T>(sel)`, `$$<T>(sel)`, `toggleBtn(el, on)`.
-  - `rng`: `reseed(s)`, `rnd()`, `randInt(lo, hi)`, `shuffle<T>(arr)`.
+  - `rng`: `interface Rng` and **`createRng(seed?): Rng`** with `rnd`, `randInt`, `shuffle`, `reseed`.
   - `loop`: `startLoop(ticker, frame, maxDt?)` where `ticker` is `{ add(fn): void; deltaTime: number }`.
 
-- [ ] **Step 1: Copy the four files from the tracer**
+> Three of these cross over from the tracer unchanged. `rng` does not: the tracer keeps `_seed` at
+> module scope, which means one game reseeding for a level would silently reshuffle another, and two
+> tests in the same file would share a sequence. It becomes a factory (spec D13). The LCG constants and
+> the call order are preserved, so a given seed still produces the tracer's sequence.
 
-Copy verbatim, then apply exactly these changes:
+- [ ] **Step 1: Copy three files from the tracer**
 
 | From `<TRACER>` | To | Changes |
 |---|---|---|
-| `app/js/platform/storage.ts` | `engine/platform/storage.ts` | Translate the header comment to English. Replace the whole `KEYS` object with the one below — the tracer's keys are its own game's. |
-| `app/js/ui/dom.ts` | `engine/ui/dom.ts` | Translate the header comment to English. Keep `$`, `$$`, `toggleBtn` unchanged. |
-| `app/js/core/rng.ts` | `engine/core/rng.ts` | Translate the header comment to English. Keep the LCG constants unchanged. |
-| `app/js/core/loop.ts` | `engine/core/loop.ts` | Translate the header comment to English. Import `MAX_DT` from `constants.js` and use it as the default instead of the literal `2`. |
+| `app/js/platform/storage.ts` | `engine/platform/storage.ts` | Header comment to English. Replace the whole `KEYS` object with the one below. |
+| `app/js/ui/dom.ts` | `engine/ui/dom.ts` | Header comment to English. `$`, `$$`, `toggleBtn` unchanged. |
+| `app/js/core/loop.ts` | `engine/core/loop.ts` | Header comment to English. Import `MAX_DT` and use it as the default instead of the literal `2`. |
 
 The `KEYS` registry for this project:
 ```ts
@@ -391,36 +466,54 @@ export function startLoop(ticker: Ticker, frame: (dt: number) => void, maxDt = M
 `engine/core/rng.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { beforeEach, describe, expect, it } from 'vitest';
-import { randInt, reseed, rnd, shuffle } from './rng.js';
+import { describe, expect, it } from 'vitest';
+import { createRng } from './rng.js';
 
-describe('rng', () => {
-  beforeEach(() => reseed(1));
-
+describe('createRng', () => {
   it('is deterministic: the same seed replays the same sequence', () => {
-    const first = [rnd(), rnd(), rnd()];
-    reseed(1);
-    expect([rnd(), rnd(), rnd()]).toEqual(first);
+    const a = createRng(1);
+    const b = createRng(1);
+    expect([a.rnd(), a.rnd(), a.rnd()]).toEqual([b.rnd(), b.rnd(), b.rnd()]);
   });
 
   it('diverges on a different seed', () => {
-    const a = [rnd(), rnd(), rnd()];
-    reseed(2);
-    expect([rnd(), rnd(), rnd()]).not.toEqual(a);
+    const a = createRng(1);
+    const b = createRng(2);
+    expect([a.rnd(), a.rnd()]).not.toEqual([b.rnd(), b.rnd()]);
+  });
+
+  it('gives each instance its OWN sequence, so one game cannot disturb another', () => {
+    const a = createRng(1);
+    const b = createRng(1);
+    a.rnd();
+    a.reseed(999);
+    // b is untouched: it must still be on the second value of seed 1.
+    const fresh = createRng(1);
+    fresh.rnd();
+    expect(b.rnd()).not.toBe(fresh.rnd());
+  });
+
+  it('reseeding restarts the sequence', () => {
+    const r = createRng(1);
+    const first = [r.rnd(), r.rnd()];
+    r.reseed(1);
+    expect([r.rnd(), r.rnd()]).toEqual(first);
   });
 
   it('stays inside [0, 1)', () => {
+    const r = createRng(7);
     for (let i = 0; i < 1000; i++) {
-      const v = rnd();
+      const v = r.rnd();
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(1);
     }
   });
 
   it('randInt covers both endpoints and never exceeds them', () => {
+    const r = createRng(3);
     const seen = new Set<number>();
     for (let i = 0; i < 1000; i++) {
-      const v = randInt(3, 6);
+      const v = r.randInt(3, 6);
       expect(Number.isInteger(v)).toBe(true);
       expect(v).toBeGreaterThanOrEqual(3);
       expect(v).toBeLessThanOrEqual(6);
@@ -430,18 +523,18 @@ describe('rng', () => {
   });
 
   it('randInt with lo === hi returns that value', () => {
-    expect(randInt(7, 7)).toBe(7);
+    expect(createRng(1).randInt(7, 7)).toBe(7);
   });
 
   it('shuffle returns a permutation and leaves the input alone', () => {
     const input = Object.freeze([1, 2, 3, 4, 5]);
-    const out = shuffle(input);
+    const out = createRng(1).shuffle(input);
     expect(out).not.toBe(input);
     expect([...out].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('shuffle of an empty array is an empty array', () => {
-    expect(shuffle([])).toEqual([]);
+    expect(createRng(1).shuffle([])).toEqual([]);
   });
 });
 ```
@@ -504,18 +597,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as store from './storage.js';
 
 /** In-memory localStorage, installed on globalThis — the node project has no DOM. */
-function installStorage(): Map<string, string> {
+function installStorage(): void {
   const map = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
     setItem: (k: string, v: string) => { map.set(k, v); },
     removeItem: (k: string) => { map.delete(k); },
   });
-  return map;
 }
 
 describe('storage', () => {
-  beforeEach(() => { installStorage(); });
+  beforeEach(() => installStorage());
 
   it('round-trips a string', () => {
     expect(store.set('k', 'v')).toBe(true);
@@ -564,27 +656,63 @@ describe('storage', () => {
 Run: `npx vitest run --project node engine/`
 Expected: FAIL — unresolved imports for `rng.js`, `loop.js`, `storage.js`.
 
-- [ ] **Step 4: Create the four files as described in Step 1**
+- [ ] **Step 4: Write `engine/core/rng.ts`**
 
-- [ ] **Step 5: Run the tests to verify they pass**
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// core/rng — a seeded LCG, per instance.
+//
+// The tracer keeps its seed at module scope. That is fine for one game and wrong for a collection:
+// a game reseeding for a level would silently reshuffle whatever else held a reference, and two tests
+// in one file would share a sequence. The generator itself is the tracer's, constants and call order
+// unchanged, so a given seed still produces the same numbers.
+export interface Rng {
+  rnd(): number;
+  randInt(lo: number, hi: number): number;
+  shuffle<T>(arr: readonly T[]): T[];
+  reseed(s: number): void;
+}
+
+export function createRng(seed = 20260601): Rng {
+  let s = seed >>> 0;
+  const rnd = (): number => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  return {
+    rnd,
+    randInt: (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1)),
+    shuffle<T>(arr: readonly T[]): T[] {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = (rnd() * (i + 1)) | 0;
+        [a[i], a[j]] = [a[j]!, a[i]!];
+      }
+      return a;
+    },
+    reseed(next) { s = next >>> 0; },
+  };
+}
+```
+
+- [ ] **Step 5: Create the other three files as described in Step 1**
+
+- [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `npx vitest run --project node engine/`
-Expected: PASS. `constants` 4, `rng` 7, `loop` 4, `storage` 6.
+Expected: PASS. `constants` 4, `rng` 9, `loop` 4, `storage` 6.
 
-- [ ] **Step 6: Run typecheck**
+- [ ] **Step 7: Typecheck and format**
 
-Run: `npx tsc --noEmit`
-Expected: no output, exit 0.
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add engine/platform/storage.ts engine/platform/storage.test.ts engine/ui/dom.ts engine/core/rng.ts engine/core/rng.test.ts engine/core/loop.ts engine/core/loop.test.ts
 git commit -m "feat: lift the leaf modules from the tracer
 
-storage, dom, rng and loop cross over unchanged apart from English headers.
-The KEYS registry is replaced with this project's own, namespaced demos.,
-and startLoop now defaults to MAX_DT instead of a literal."
+storage, dom and loop cross over unchanged apart from English headers and this
+project's KEYS. rng becomes a factory: a module-level seed would let one game's
+reseed reshuffle another's sequence."
 ```
 
 ---
@@ -780,27 +908,38 @@ overlap-only testing lets it tunnel through bricks."
 
 ---
 
+
 ### Task 4: i18n with per-game dictionaries
 
 **Files:**
-- Create: `engine/core/i18n.ts`
-- Create: `engine/i18n/pt.ts`, `engine/i18n/en.ts`, `engine/i18n/es.ts` (shell strings only)
+- Create: `engine/core/i18n.ts`, `engine/i18n/pt.ts`, `engine/i18n/en.ts`, `engine/i18n/es.ts`
 - Test: `engine/core/i18n.test.ts`
 
 **Interfaces:**
-- Consumes: `storage` (`KEYS.lang`, `get`, `set`) from Task 2.
-- Produces:
-  - `t(key, params?): string` — global/shell keys.
-  - `scopedT(ns: string): Translate` — a translate function pre-namespaced to one game.
-  - `registerDict(ns: string, s: GameStrings): void` — merges a game's three dictionaries under `ns`.
-  - `setLocale(code: string): Promise<void>`, `getLocale(): string`, `bcp47(code?): string`, `availableLocales(): string[]`, `applyDom(root?): void`, `initI18n(): void`.
-  - The `i18n:change` `CustomEvent` on `window`, carrying `{ locale }`.
+- Consumes: `storage` from Task 2.
+- Produces: `createI18n(): I18n`, where
 
-> The tracer's version is the starting point (`<TRACER>/app/js/core/i18n.ts`, 90 lines). Two things change,
-> both forced by having 383 games instead of one: dictionaries arrive at runtime with a game's chunk rather
-> than being three static files, and lookups are namespaced so `snake.gameOver` cannot collide with
-> `pong.gameOver`. Everything else — the chained fallback, `{param}` interpolation, `applyDom`, `bcp47` —
-> is copied.
+```ts
+export interface I18n {
+  t: Translate;
+  scoped(ns: string): Translate;
+  register(ns: string, s: GameStrings): void;
+  locale(): string;
+  available(): string[];
+  bcp47(code?: string): string;
+  applyDom(root?: ParentNode): void;
+  setLocale(code: string): Promise<void>;
+  onChange(fn: (locale: string) => void): () => void;
+  init(): Promise<void>;
+}
+```
+
+> The tracer's version is the starting point (`<TRACER>/app/js/core/i18n.ts`, 90 lines). Three things
+> change. Dictionaries arrive at runtime with a game's chunk rather than being three static files, and
+> lookups are namespaced so `snake.gameOver` cannot collide with `pong.gameOver` — both forced by having
+> 383 games. And the module becomes a factory with an explicit `onChange` subscription instead of a
+> module-level `locale` plus a `window` CustomEvent: an ambient event is an undeclared dependency that
+> every consumer has to know about, and it makes the module untestable without stubbing `window`.
 
 - [ ] **Step 1: Write the shell dictionaries**
 
@@ -824,6 +963,15 @@ export default {
   'shell.loading': 'Carregando o jogo…',
   'shell.notFound': 'Jogo não encontrado: {slug}',
   'shell.gameOver': 'Fim de jogo. {score} pontos.',
+  'shell.crashed': 'O jogo falhou e foi interrompido. Volte ao catálogo ou reinicie.',
+  'viz.none': 'Cores normais',
+  'viz.simProtan': 'Simular protanopia',
+  'viz.simDeuter': 'Simular deuteranopia',
+  'viz.simTritan': 'Simular tritanopia',
+  'viz.fixProtan': 'Corrigir para protanopia',
+  'viz.fixDeuter': 'Corrigir para deuteranopia',
+  'viz.fixTritan': 'Corrigir para tritanopia',
+  'viz.lowVision': 'Baixa visão (ampliar)',
 };
 ```
 
@@ -845,6 +993,15 @@ export default {
   'shell.loading': 'Loading the game…',
   'shell.notFound': 'Game not found: {slug}',
   'shell.gameOver': 'Game over. {score} points.',
+  'shell.crashed': 'The game failed and was stopped. Go back to the catalog or restart.',
+  'viz.none': 'Normal colours',
+  'viz.simProtan': 'Simulate protanopia',
+  'viz.simDeuter': 'Simulate deuteranopia',
+  'viz.simTritan': 'Simulate tritanopia',
+  'viz.fixProtan': 'Correct for protanopia',
+  'viz.fixDeuter': 'Correct for deuteranopia',
+  'viz.fixTritan': 'Correct for tritanopia',
+  'viz.lowVision': 'Low vision (magnify)',
 };
 ```
 
@@ -866,6 +1023,15 @@ export default {
   'shell.loading': 'Cargando el juego…',
   'shell.notFound': 'Juego no encontrado: {slug}',
   'shell.gameOver': 'Fin del juego. {score} puntos.',
+  'shell.crashed': 'El juego falló y se detuvo. Vuelve al catálogo o reinicia.',
+  'viz.none': 'Colores normales',
+  'viz.simProtan': 'Simular protanopía',
+  'viz.simDeuter': 'Simular deuteranopía',
+  'viz.simTritan': 'Simular tritanopía',
+  'viz.fixProtan': 'Corregir para protanopía',
+  'viz.fixDeuter': 'Corregir para deuteranopía',
+  'viz.fixTritan': 'Corregir para tritanopía',
+  'viz.lowVision': 'Baja visión (ampliar)',
 };
 ```
 
@@ -874,85 +1040,119 @@ export default {
 `engine/core/i18n.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { availableLocales, bcp47, getLocale, registerDict, scopedT, setLocale, t } from './i18n.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createI18n, type GameStrings } from './i18n.js';
 
-function installStorage(): void {
+function stubEnv(): void {
   const map = new Map<string, string>();
   vi.stubGlobal('localStorage', {
-    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    getItem: (k: string) => map.get(k) ?? null,
     setItem: (k: string, v: string) => { map.set(k, v); },
     removeItem: (k: string) => { map.delete(k); },
   });
+  vi.stubGlobal('document', { documentElement: { lang: '' } });
 }
 
-const snakeStrings = {
+const snake: GameStrings = {
   pt: { gameOver: 'Fim de jogo', ate: 'Comeu {n} maçãs' },
   en: { gameOver: 'Game over', ate: 'Ate {n} apples' },
   es: { gameOver: 'Fin del juego', ate: 'Comió {n} manzanas' },
 };
 
-describe('i18n', () => {
-  beforeEach(async () => {
-    installStorage();
-    vi.stubGlobal('document', { documentElement: { lang: '' } });
-    vi.stubGlobal('window', { dispatchEvent: () => true });
-    await setLocale('pt');
-  });
-
+/**
+ * No beforeEach cleanup ritual here, and that is the point of the factory: every test builds its own
+ * instance, so nothing leaks between cases.
+ */
+describe('createI18n', () => {
   it('offers exactly the three floor languages', () => {
-    expect(availableLocales().sort()).toEqual(['en', 'es', 'pt']);
+    stubEnv();
+    expect(createI18n().available().sort()).toEqual(['en', 'es', 'pt']);
   });
 
   it('translates a shell key', () => {
-    expect(t('shell.resume')).toBe('Continuar');
+    stubEnv();
+    expect(createI18n().t('shell.resume')).toBe('Continuar');
   });
 
   it('returns the key itself when nothing matches, so a miss is visible rather than blank', () => {
-    expect(t('shell.doesNotExist')).toBe('shell.doesNotExist');
+    stubEnv();
+    expect(createI18n().t('shell.doesNotExist')).toBe('shell.doesNotExist');
   });
 
   it('interpolates {param}, including repeats', () => {
-    registerDict('demo', { pt: { hi: '{a} e {a} e {b}' }, en: { hi: '' }, es: { hi: '' } });
-    expect(scopedT('demo')('hi', { a: 'x', b: 2 })).toBe('x e x e 2');
+    stubEnv();
+    const i18n = createI18n();
+    i18n.register('demo', { pt: { hi: '{a} e {a} e {b}' }, en: {}, es: {} });
+    expect(i18n.scoped('demo')('hi', { a: 'x', b: 2 })).toBe('x e x e 2');
   });
 
-  it('namespaces a game dictionary so two games can share a key name', () => {
-    registerDict('snake', snakeStrings);
-    registerDict('pong', { pt: { gameOver: 'Acabou' }, en: { gameOver: 'Done' }, es: { gameOver: 'Listo' } });
-    expect(scopedT('snake')('gameOver')).toBe('Fim de jogo');
-    expect(scopedT('pong')('gameOver')).toBe('Acabou');
+  it('namespaces game dictionaries so two games can share a key name', () => {
+    stubEnv();
+    const i18n = createI18n();
+    i18n.register('snake', snake);
+    i18n.register('pong', { pt: { gameOver: 'Acabou' }, en: {}, es: {} });
+    expect(i18n.scoped('snake')('gameOver')).toBe('Fim de jogo');
+    expect(i18n.scoped('pong')('gameOver')).toBe('Acabou');
+  });
+
+  it('keeps two instances fully independent', () => {
+    stubEnv();
+    const a = createI18n();
+    const b = createI18n();
+    a.register('x', { pt: { k: 'from a' }, en: {}, es: {} });
+    expect(b.scoped('x')('k')).toBe('k');
   });
 
   it('switches every registered namespace when the locale changes', async () => {
-    registerDict('snake', snakeStrings);
-    await setLocale('en');
-    expect(getLocale()).toBe('en');
-    expect(t('shell.resume')).toBe('Resume');
-    expect(scopedT('snake')('ate', { n: 3 })).toBe('Ate 3 apples');
+    stubEnv();
+    const i18n = createI18n();
+    i18n.register('snake', snake);
+    await i18n.setLocale('en');
+    expect(i18n.locale()).toBe('en');
+    expect(i18n.t('shell.resume')).toBe('Resume');
+    expect(i18n.scoped('snake')('ate', { n: 3 })).toBe('Ate 3 apples');
   });
 
   it('falls back to pt for a key the active locale is missing', async () => {
-    registerDict('half', { pt: { only: 'só em pt' }, en: {}, es: {} });
-    await setLocale('en');
-    expect(scopedT('half')('only')).toBe('só em pt');
+    stubEnv();
+    const i18n = createI18n();
+    i18n.register('half', { pt: { only: 'só em pt' }, en: {}, es: {} });
+    await i18n.setLocale('en');
+    expect(i18n.scoped('half')('only')).toBe('só em pt');
   });
 
   it('rejects an unknown locale by falling back to pt', async () => {
-    await setLocale('de');
-    expect(getLocale()).toBe('pt');
+    stubEnv();
+    const i18n = createI18n();
+    await i18n.setLocale('de');
+    expect(i18n.locale()).toBe('pt');
   });
 
   it('tags pt with a region and leaves en and es without one', () => {
-    expect(bcp47('pt')).toBe('pt-BR');
-    expect(bcp47('en')).toBe('en');
-    expect(bcp47('es')).toBe('es');
+    stubEnv();
+    const i18n = createI18n();
+    expect(i18n.bcp47('pt')).toBe('pt-BR');
+    expect(i18n.bcp47('en')).toBe('en');
+    expect(i18n.bcp47('es')).toBe('es');
+  });
+
+  it('notifies subscribers on change, and stops after unsubscribe', async () => {
+    stubEnv();
+    const i18n = createI18n();
+    const seen: string[] = [];
+    const off = i18n.onChange((l) => seen.push(l));
+    await i18n.setLocale('en');
+    off();
+    await i18n.setLocale('es');
+    expect(seen).toEqual(['en']);
   });
 
   it('registering the same namespace twice replaces rather than merges', () => {
-    registerDict('twice', { pt: { k: 'first' }, en: {}, es: {} });
-    registerDict('twice', { pt: { k: 'second' }, en: {}, es: {} });
-    expect(scopedT('twice')('k')).toBe('second');
+    stubEnv();
+    const i18n = createI18n();
+    i18n.register('twice', { pt: { k: 'first' }, en: {}, es: {} });
+    i18n.register('twice', { pt: { k: 'second' }, en: {}, es: {} });
+    expect(i18n.scoped('twice')('k')).toBe('second');
   });
 });
 ```
@@ -969,13 +1169,16 @@ Expected: FAIL — `Failed to resolve import "./i18n.js"`.
 // SPDX-License-Identifier: GPL-3.0-or-later
 // core/i18n — translation with a chained fallback and per-namespace dictionaries.
 //
-// Adapted from the tracer's core/i18n.ts. Two deliberate differences, both forced by 383 games:
+// Adapted from the tracer's core/i18n.ts. Three deliberate differences:
 //
-//   1. A game's strings are NOT in the locale files. Each game exports its own `strings` and calls
-//      registerDict(slug, strings) when its chunk loads, so a visitor downloads only the text of the
-//      games they actually open.
-//   2. Lookups are namespaced. `scopedT('snake')('gameOver')` reads `snake.gameOver`, so two games
-//      may use the same key name without one silently winning.
+//   1. A game's strings are NOT in the locale files. Each game exports its own `strings` and the
+//      session registers them under the game's slug, so a visitor downloads only the text of the games
+//      they open.
+//   2. Lookups are namespaced. `scoped('snake')('gameOver')` reads snake's dictionary, so two games may
+//      use the same key name without one silently winning.
+//   3. It is a factory with an explicit onChange subscription, not a module singleton broadcasting a
+//      window CustomEvent. An ambient event is a dependency nobody declares, and it forces every test
+//      of this module to stub `window`.
 //
 // pt is imported statically so the shell has text before any await resolves; en and es load on demand.
 import pt from '../i18n/pt.js';
@@ -987,23 +1190,9 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 
 const AVAILABLE = ['pt', 'en', 'es'] as const;
 type LocaleCode = (typeof AVAILABLE)[number];
+const isLocale = (c: string): c is LocaleCode => (AVAILABLE as readonly string[]).includes(c);
 
 const shellLoaders = import.meta.glob<{ default: LocaleDict }>('../i18n/*.ts');
-
-// Shell dictionaries already loaded. pt is present from the start.
-const shell: Record<string, LocaleDict> = { pt };
-// Game dictionaries by namespace, all three locales kept so a locale switch needs no reload.
-const games = new Map<string, GameStrings>();
-
-let locale: LocaleCode = 'pt';
-
-/** Look a key up in one dictionary set, chained locale → pt → null. */
-function lookup(dicts: { pt: LocaleDict; [k: string]: LocaleDict | undefined }, key: string): string | null {
-  const active = dicts[locale];
-  if (active && key in active) return active[key]!;
-  if (key in dicts.pt) return dicts.pt[key]!;
-  return null;
-}
 
 function interpolate(s: string, params?: Record<string, string | number>): string {
   if (!params) return s;
@@ -1012,101 +1201,116 @@ function interpolate(s: string, params?: Record<string, string | number>): strin
   return out;
 }
 
-/** Translate a shell key. Unknown keys return the key itself, so a miss is visible, not blank. */
-export function t(key: string, params?: Record<string, string | number>): string {
-  const hit = lookup({ pt, ...shell }, key);
-  return interpolate(hit ?? key, params);
+export interface I18n {
+  t: Translate;
+  scoped(ns: string): Translate;
+  register(ns: string, s: GameStrings): void;
+  locale(): string;
+  available(): string[];
+  bcp47(code?: string): string;
+  applyDom(root?: ParentNode): void;
+  setLocale(code: string): Promise<void>;
+  onChange(fn: (locale: string) => void): () => void;
+  init(): Promise<void>;
 }
 
-/** Register one game's three dictionaries under a namespace. Re-registering replaces. */
-export function registerDict(ns: string, s: GameStrings): void {
-  games.set(ns, s);
-}
+export function createI18n(): I18n {
+  const shell: Record<string, LocaleDict> = { pt };
+  const games = new Map<string, GameStrings>();
+  const listeners = new Set<(l: string) => void>();
+  let locale: LocaleCode = 'pt';
 
-/** A translate function bound to one namespace, so the game never writes its own prefix. */
-export function scopedT(ns: string): Translate {
-  return (key, params) => {
-    const s = games.get(ns);
-    if (!s) return interpolate(key, params);
-    return interpolate(lookup(s, key) ?? key, params);
+  /** Chained lookup: active locale, then pt, then nothing. */
+  const lookup = (dicts: { pt: LocaleDict; [k: string]: LocaleDict | undefined }, key: string): string | null => {
+    const active = dicts[locale];
+    if (active && key in active) return active[key]!;
+    return key in dicts.pt ? dicts.pt[key]! : null;
   };
-}
 
-export function getLocale(): string { return locale; }
-export function availableLocales(): string[] { return [...AVAILABLE]; }
+  const t: Translate = (key, params) => interpolate(lookup({ ...shell, pt }, key) ?? key, params);
 
-/**
- * The BCP-47 tag for `<html lang>` and for browser APIs that speak or compare language.
- * Only Portuguese needs a region: bare 'pt' lets the browser pick between pt-PT and pt-BR, and the
- * prosody difference is audible. English and Spanish stay region-free on purpose — pinning 'en-US'
- * would impose an American accent on a reader in India or Nigeria.
- */
-export function bcp47(code: string = locale): string { return code === 'pt' ? 'pt-BR' : code; }
+  const bcp47 = (code: string = locale): string => (code === 'pt' ? 'pt-BR' : code);
 
-/** Apply declarative translations: [data-i18n] → textContent, [data-i18n-aria] → aria-label. */
-export function applyDom(root: ParentNode = document): void {
-  root.querySelectorAll('[data-i18n]').forEach((el) => {
-    const k = el.getAttribute('data-i18n');
-    if (k) el.textContent = t(k);
-  });
-  root.querySelectorAll('[data-i18n-aria]').forEach((el) => {
-    const k = el.getAttribute('data-i18n-aria');
-    if (k) el.setAttribute('aria-label', t(k));
-  });
-}
+  const applyDom = (root: ParentNode = document): void => {
+    root.querySelectorAll('[data-i18n]').forEach((el) => {
+      const k = el.getAttribute('data-i18n');
+      if (k) el.textContent = t(k);
+    });
+    root.querySelectorAll('[data-i18n-aria]').forEach((el) => {
+      const k = el.getAttribute('data-i18n-aria');
+      if (k) el.setAttribute('aria-label', t(k));
+    });
+  };
 
-async function ensureShell(code: LocaleCode): Promise<void> {
-  if (shell[code]) return;
-  const load = shellLoaders[`../i18n/${code}.ts`];
-  if (!load) return;
-  shell[code] = (await load()).default;
-}
+  async function ensureShell(code: LocaleCode): Promise<void> {
+    if (shell[code]) return;
+    const load = shellLoaders[`../i18n/${code}.ts`];
+    if (load) shell[code] = (await load()).default;
+  }
 
-/**
- * Switch language: load the shell dictionary if needed, persist, update <html lang>, re-apply the DOM,
- * and announce. Game dictionaries need no loading — all three locales shipped with the game's chunk.
- */
-export async function setLocale(code: string): Promise<void> {
-  const next = (AVAILABLE as readonly string[]).includes(code) ? (code as LocaleCode) : 'pt';
-  await ensureShell(next);
-  locale = next;
-  store.set(store.KEYS.lang, next);
-  document.documentElement.lang = bcp47(next);
-  if (typeof document.querySelectorAll === 'function') applyDom(document);
-  window.dispatchEvent(new CustomEvent('i18n:change', { detail: { locale } }));
-}
+  return {
+    t,
+    scoped: (ns) => (key, params) => {
+      const s = games.get(ns);
+      return interpolate(s ? (lookup(s, key) ?? key) : key, params);
+    },
+    register: (ns, s) => { games.set(ns, s); },
+    locale: () => locale,
+    available: () => [...AVAILABLE],
+    bcp47,
+    applyDom,
 
-/** Boot: pt is already applied synchronously; switch asynchronously if another language is preferred. */
-export function initI18n(): void {
-  const saved = store.get(store.KEYS.lang, null);
-  const nav = (globalThis.navigator?.language ?? 'pt').slice(0, 2).toLowerCase();
-  const want = saved && (AVAILABLE as readonly string[]).includes(saved) ? saved : nav;
-  if ((AVAILABLE as readonly string[]).includes(want) && want !== 'pt') void setLocale(want);
+    async setLocale(code) {
+      const next = isLocale(code) ? code : 'pt';
+      await ensureShell(next);
+      locale = next;
+      store.set(store.KEYS.lang, next);
+      document.documentElement.lang = bcp47(next);
+      if (typeof document.querySelectorAll === 'function') applyDom(document);
+      for (const fn of listeners) fn(locale);
+    },
+
+    onChange(fn) {
+      listeners.add(fn);
+      return () => { listeners.delete(fn); };
+    },
+
+    /**
+     * Boot: pt is already live synchronously. Switch only if another language is preferred, and AWAIT
+     * it — the tracer fires and forgets, which makes the first frame race the dictionary.
+     */
+    async init() {
+      const saved = store.get(store.KEYS.lang, null);
+      const nav = (globalThis.navigator?.language ?? 'pt').slice(0, 2).toLowerCase();
+      const want = saved && isLocale(saved) ? saved : nav;
+      if (isLocale(want) && want !== 'pt') await this.setLocale(want);
+    },
+  };
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 5: Run the test, typecheck and format**
 
 Run: `npx vitest run --project node engine/core/i18n.test.ts`
-Expected: PASS, 10 tests.
+Expected: PASS, 13 tests.
 
-- [ ] **Step 6: Run typecheck**
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
 
-Run: `npx tsc --noEmit`
-Expected: no output, exit 0.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add engine/core/i18n.ts engine/core/i18n.test.ts engine/i18n/
-git commit -m "feat: add i18n with per-namespace game dictionaries
+git commit -m "feat: add i18n as a factory with per-namespace game dictionaries
 
-Adapted from the tracer. A game ships its own three locales with its chunk
-and registers them under its slug, so no visitor downloads 383 games' text
-and two games may reuse a key name."
+Adapted from the tracer. A game ships its own three locales with its chunk and
+registers them under its slug, so nobody downloads 383 games' text and two
+games may reuse a key name. Subscription is explicit instead of a window
+CustomEvent: an ambient event is a dependency nobody declares."
 ```
 
 ---
+
 
 ### Task 5: Screen-reader announcements
 
@@ -1115,11 +1319,12 @@ and two games may reuse a key name."
 - Test: `engine/core/a11y-sr.browser.test.ts`
 
 **Interfaces:**
-- Consumes: `$` from `engine/ui/dom.ts` (Task 2).
-- Produces: `srSay(text: string): void` (polite) and `srAlert(text: string): void` (assertive), both writing into `#sr-status` / `#sr-alert`, which Task 9 puts in `play.html`.
+- Consumes: nothing.
+- Produces: `createAnnouncer(root?: ParentNode): Announcer` with `say(text)` (polite) and `alert(text)` (assertive), writing into `#sr-status` / `#sr-alert`, which Task 10 puts in `play.html`.
 
-> This is a browser test, not a node one: the clear → `requestAnimationFrame` → write pattern is the
-> whole point of the module, and a fake timer would test the fake rather than the behaviour.
+> A browser test, not a node one: the clear → `requestAnimationFrame` → write pattern is the whole
+> module, and a fake timer would test the fake. It takes a `root` so a test can hand it a fragment,
+> which also means it never reaches for a global document it did not ask for.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1127,55 +1332,66 @@ and two games may reuse a key name."
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { beforeEach, describe, expect, it } from 'vitest';
-import { srAlert, srSay } from './a11y-sr.js';
+import { createAnnouncer } from './a11y-sr.js';
 
 const nextFrame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
 
-describe('screen-reader regions', () => {
-  beforeEach(() => {
-    document.body.innerHTML =
-      '<div id="sr-status" role="status" aria-live="polite" aria-atomic="true"></div>' +
-      '<div id="sr-alert" role="alert" aria-live="assertive" aria-atomic="true"></div>';
-  });
+beforeEach(() => {
+  document.body.innerHTML =
+    '<div id="sr-status" role="status" aria-live="polite" aria-atomic="true"></div>' +
+    '<div id="sr-alert" role="alert" aria-live="assertive" aria-atomic="true"></div>';
+});
 
+describe('createAnnouncer', () => {
   it('writes into the polite region', async () => {
-    srSay('ten points');
+    createAnnouncer().say('ten points');
     await nextFrame();
     expect(document.querySelector('#sr-status')!.textContent).toBe('ten points');
   });
 
   it('writes into the assertive region', async () => {
-    srAlert('game over');
+    createAnnouncer().alert('game over');
     await nextFrame();
     expect(document.querySelector('#sr-alert')!.textContent).toBe('game over');
   });
 
   it('clears before writing, so the same text is announced twice', async () => {
-    srSay('same');
+    const a = createAnnouncer();
+    a.say('same');
     await nextFrame();
-    srSay('same');
+    a.say('same');
     expect(document.querySelector('#sr-status')!.textContent).toBe('');
     await nextFrame();
     expect(document.querySelector('#sr-status')!.textContent).toBe('same');
   });
 
   it('keeps the two regions independent', async () => {
-    srSay('polite');
-    srAlert('urgent');
+    const a = createAnnouncer();
+    a.say('polite');
+    a.alert('urgent');
     await nextFrame();
     expect(document.querySelector('#sr-status')!.textContent).toBe('polite');
     expect(document.querySelector('#sr-alert')!.textContent).toBe('urgent');
   });
 
+  it('announces into the root it was given, not the document', async () => {
+    const frag = document.createElement('div');
+    frag.innerHTML = '<div id="sr-status"></div>';
+    createAnnouncer(frag).say('scoped');
+    await nextFrame();
+    expect(frag.querySelector('#sr-status')!.textContent).toBe('scoped');
+    expect(document.querySelector('#sr-status')!.textContent).toBe('');
+  });
+
   it('does not throw when the regions are absent', () => {
     document.body.innerHTML = '';
-    expect(() => srSay('nobody listening')).not.toThrow();
-    expect(() => srAlert('nobody listening')).not.toThrow();
+    const a = createAnnouncer();
+    expect(() => { a.say('nobody listening'); a.alert('nobody listening'); }).not.toThrow();
   });
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run --project browser engine/core/a11y-sr.browser.test.ts`
 Expected: FAIL — `Failed to resolve import "./a11y-sr.js"`.
@@ -1188,41 +1404,46 @@ Expected: FAIL — `Failed to resolve import "./a11y-sr.js"`.
 // core/a11y-sr — announcements for screen readers. Adapted from the tracer's core/a11y-sr.ts, minus
 // its Libras injection hook, which belongs to that project.
 //
-// srSay writes into the aria-live="polite" region (status: waits its turn); srAlert writes into the
-// aria-live="assertive" one (interrupts). The clear → requestAnimationFrame → write dance is not
-// ceremony: writing the same string twice in a row is a no-op to a screen reader, so scoring ten
-// points twice would announce once. Clearing first forces the re-announcement.
+// The clear → requestAnimationFrame → write dance is not ceremony: writing the same string twice in a
+// row is a no-op to a screen reader, so scoring ten points twice would be announced once. Clearing
+// first forces the re-announcement.
 //
-// The regions themselves live in play.html, so a game never has to create them.
-import { $ } from '../ui/dom.js';
-
-function announce(sel: string, text: string): void {
-  const el = $(sel);
-  if (!el) return;
-  el.textContent = '';
-  requestAnimationFrame(() => { el.textContent = text; });
+// The regions live in play.html, so a game never creates them.
+export interface Announcer {
+  /** Polite: does not interrupt what the reader is currently saying. */
+  say(text: string): void;
+  /** Assertive: interrupts. Reserve it for what the player must hear now. */
+  alert(text: string): void;
 }
 
-/** Polite announcement: does not interrupt what the reader is currently saying. */
-export const srSay = (text: string): void => announce('#sr-status', text);
-
-/** Assertive announcement: interrupts. Reserve it for what the player must hear now. */
-export const srAlert = (text: string): void => announce('#sr-alert', text);
+export function createAnnouncer(root: ParentNode = document): Announcer {
+  const announce = (sel: string, text: string): void => {
+    const el = root.querySelector(sel);
+    if (!el) return;
+    el.textContent = '';
+    requestAnimationFrame(() => { el.textContent = text; });
+  };
+  return {
+    say: (text) => announce('#sr-status', text),
+    alert: (text) => announce('#sr-alert', text),
+  };
+}
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run --project browser engine/core/a11y-sr.browser.test.ts`
-Expected: PASS, 5 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add engine/core/a11y-sr.ts engine/core/a11y-sr.browser.test.ts
-git commit -m "feat: add screen-reader announcement helpers
+git commit -m "feat: add screen-reader announcements as a factory
 
-Clear-then-write on the next frame, so repeating the same announcement is
-actually announced twice instead of silently swallowed."
+Clear-then-write on the next frame, so repeating an announcement is actually
+announced twice. Takes its root as an argument rather than reaching for a
+global document."
 ```
 
 ---
@@ -1230,67 +1451,72 @@ actually announced twice instead of silently swallowed."
 ### Task 6: Input
 
 **Files:**
-- Create: `engine/input/state.ts`, `engine/input/keyboard.ts`, `engine/input/latch.ts`, `engine/input/attach.ts`
-- Test: `engine/input/state.test.ts`, `engine/input/latch.test.ts`, `engine/input/attach.browser.test.ts`
+- Create: `engine/input/actions.ts`, `engine/input/keyboard.ts`, `engine/input/latch.ts`, `engine/input/attach.ts`
+- Test: `engine/input/actions.test.ts`, `engine/input/latch.test.ts`, `engine/input/keyboard.test.ts`, `engine/input/attach.browser.test.ts`
 
 **Interfaces:**
 - Consumes: `storage` from Task 2.
 - Produces:
-  - `ACTIONS: readonly Action[]` and `type Action` from `state.ts`.
-  - `keys: Set<string>`, `held(scheme, act, padIndex)` from `state.ts`.
-  - `KB_DEFAULTS`, `loadKB()`, `saveKB(kb)`, `resetKB()`, `kb`, `initKB()` from `keyboard.ts`.
-  - `attachInput(el: HTMLElement, players: number): InputApi & { poll(): void; detach(): void }` from `attach.ts`.
+  - `actions.ts`: `type Action`, `ACTIONS`, `type KeyScheme`, `type PadState`, `PAD_DEAD`, and the **pure** `heldIn(scheme, keys, pad, act)`.
+  - `keyboard.ts`: `type KBDefaults`, `KB_DEFAULTS`, `loadKB()`, `saveKB(kb)`, `resetKB()`, `schemesFor(kb, players)`, `ownedCodes(kb, players)` — all pure functions over an explicit `kb`.
+  - `latch.ts`: `makeLatch(): Latch`.
+  - `attach.ts`: `attachInput(el, players, kb): InputApi & { poll(): void; detach(): void }`.
 
-> The eight actions and the four schemes come from the tracer verbatim, because a player who knows one
-> game in the constellation should not have to relearn the keys for the next. The gamepad dead zone of
-> `0.5` is also the tracer's, chosen for ergonomics rather than sensitivity.
+> The tracer's `input/state.ts` exports a `Set` and an object for other modules to mutate. That module
+> hides nothing, which is what Parnas contrasts modularity against, and it is why its tests need a
+> `keys.clear()` ritual. Here the key set and the pad state are **private to the `attachInput`
+> instance**, and the only thing exported at module level is a pure function that takes them as
+> arguments. The eight actions, the schemes and the `0.5` dead zone are still the tracer's, so muscle
+> memory carries across the constellation.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing pure tests**
 
-`engine/input/state.test.ts`:
+`engine/input/actions.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { beforeEach, describe, expect, it } from 'vitest';
-import { ACTIONS, held, keys, padCur, PAD_DEAD, type KeyScheme } from './state.js';
+import { describe, expect, it } from 'vitest';
+import { ACTIONS, heldIn, PAD_DEAD, type KeyScheme } from './actions.js';
 
 const scheme: KeyScheme = {
   left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'],
   run: ['KeyU'], jump: ['KeyJ', 'Space'], swap: ['KeyI'], especial: ['KeyK'],
 };
 
-describe('input state', () => {
-  beforeEach(() => { keys.clear(); for (const k of Object.keys(padCur)) delete padCur[Number(k)]; });
-
+describe('actions', () => {
   it('names exactly the eight actions of the constellation', () => {
     expect([...ACTIONS]).toEqual(['up', 'left', 'down', 'right', 'run', 'jump', 'swap', 'especial']);
   });
 
+  it('keeps the dead zone at half the stick travel', () => {
+    expect(PAD_DEAD).toBe(0.5);
+  });
+});
+
+describe('heldIn', () => {
   it('reports a held key', () => {
-    keys.add('KeyA');
-    expect(held(scheme, 'left', -1)).toBe(true);
-    expect(held(scheme, 'right', -1)).toBe(false);
+    expect(heldIn(scheme, new Set(['KeyA']), null, 'left')).toBe(true);
+    expect(heldIn(scheme, new Set(['KeyA']), null, 'right')).toBe(false);
   });
 
   it('accepts any of the alternate keys bound to one action', () => {
-    keys.add('Space');
-    expect(held(scheme, 'jump', -1)).toBe(true);
-    keys.clear();
-    keys.add('KeyJ');
-    expect(held(scheme, 'jump', -1)).toBe(true);
+    expect(heldIn(scheme, new Set(['Space']), null, 'jump')).toBe(true);
+    expect(heldIn(scheme, new Set(['KeyJ']), null, 'jump')).toBe(true);
   });
 
-  it('reports a gamepad action when a pad is associated', () => {
-    padCur[0] = { jump: true };
-    expect(held(scheme, 'jump', 0)).toBe(true);
+  it('reports a gamepad action when a pad state is supplied', () => {
+    expect(heldIn(scheme, new Set(), { jump: true }, 'jump')).toBe(true);
   });
 
-  it('ignores gamepad state when no pad is associated', () => {
-    padCur[0] = { jump: true };
-    expect(held(scheme, 'jump', -1)).toBe(false);
+  it('ignores the pad when none is supplied', () => {
+    expect(heldIn(scheme, new Set(), null, 'jump')).toBe(false);
   });
 
-  it('keeps the dead zone at half the stick travel', () => {
-    expect(PAD_DEAD).toBe(0.5);
+  it('is pure: it mutates neither argument', () => {
+    const keys = new Set(['KeyA']);
+    const pad = { jump: true };
+    heldIn(scheme, keys, pad, 'left');
+    expect([...keys]).toEqual(['KeyA']);
+    expect(pad).toEqual({ jump: true });
   });
 });
 ```
@@ -1301,7 +1527,7 @@ describe('input state', () => {
 import { describe, expect, it } from 'vitest';
 import { makeLatch } from './latch.js';
 
-describe('latch', () => {
+describe('makeLatch', () => {
   it('reports a press only on the frame the state turns on', () => {
     const l = makeLatch();
     expect(l.pressed('a', false)).toBe(false);
@@ -1329,14 +1555,93 @@ describe('latch', () => {
     expect(l.pressed('b', true)).toBe(true);
     expect(l.pressed('a', true)).toBe(false);
   });
+
+  it('gives each instance its own memory', () => {
+    const a = makeLatch();
+    const b = makeLatch();
+    a.pressed('k', true);
+    expect(b.pressed('k', true)).toBe(true);
+  });
 });
 ```
+
+`engine/input/keyboard.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { KB_DEFAULTS, loadKB, ownedCodes, resetKB, saveKB, schemesFor } from './keyboard.js';
+
+beforeEach(() => {
+  const map = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => { map.set(k, v); },
+    removeItem: (k: string) => { map.delete(k); },
+  });
+});
+
+describe('keyboard schemes', () => {
+  it('gives one scheme for solo and one per player otherwise', () => {
+    expect(schemesFor(KB_DEFAULTS, 1).length).toBe(1);
+    expect(schemesFor(KB_DEFAULTS, 2).length).toBe(2);
+    expect(schemesFor(KB_DEFAULTS, 3).length).toBe(3);
+    expect(schemesFor(KB_DEFAULTS, 4).length).toBe(4);
+  });
+
+  it('never binds a modifier, which would collide with the browser and with AT', () => {
+    for (const n of [1, 2, 3, 4]) {
+      for (const code of ownedCodes(KB_DEFAULTS, n)) {
+        expect(code, code).not.toMatch(/^(Alt|Control|Shift|Meta)/);
+      }
+    }
+  });
+
+  it('gives two players disjoint bindings', () => {
+    const [a, b] = schemesFor(KB_DEFAULTS, 2);
+    const codesA = new Set(Object.values(a!).flat());
+    for (const code of Object.values(b!).flat()) expect(codesA.has(code), code).toBe(false);
+  });
+
+  it('collects every bound code for a player count', () => {
+    const owned = ownedCodes(KB_DEFAULTS, 1);
+    expect(owned.has('KeyA')).toBe(true);
+    expect(owned.has('Space')).toBe(true);
+    expect(owned.has('Tab')).toBe(false);
+  });
+
+  it('loads defaults when nothing is saved', () => {
+    expect(loadKB().solo.left).toEqual(KB_DEFAULTS.solo.left);
+  });
+
+  it('layers a saved partial ON TOP of the defaults, so a new action is never missing', () => {
+    saveKB({ ...KB_DEFAULTS, solo: { ...KB_DEFAULTS.solo, left: ['KeyQ'] } });
+    const kb = loadKB();
+    expect(kb.solo.left).toEqual(['KeyQ']);
+    expect(kb.solo.jump).toEqual(KB_DEFAULTS.solo.jump);
+  });
+
+  it('reset returns the defaults and forgets the saved map', () => {
+    saveKB({ ...KB_DEFAULTS, solo: { ...KB_DEFAULTS.solo, left: ['KeyQ'] } });
+    expect(resetKB().solo.left).toEqual(KB_DEFAULTS.solo.left);
+    expect(loadKB().solo.left).toEqual(KB_DEFAULTS.solo.left);
+  });
+
+  it('loadKB never returns the shared defaults object', () => {
+    const kb = loadKB();
+    kb.solo.left.push('KeyZ');
+    expect(KB_DEFAULTS.solo.left).not.toContain('KeyZ');
+  });
+});
+```
+
+- [ ] **Step 2: Write the failing browser test**
 
 `engine/input/attach.browser.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { attachInput } from './attach.js';
+import { KB_DEFAULTS } from './keyboard.js';
 
 let region: HTMLElement;
 let api: ReturnType<typeof attachInput>;
@@ -1344,14 +1649,14 @@ let api: ReturnType<typeof attachInput>;
 const key = (type: 'keydown' | 'keyup', code: string): KeyboardEvent =>
   new KeyboardEvent(type, { code, bubbles: true, cancelable: true });
 
-describe('attachInput', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '<div id="game-region" tabindex="0"></div><input id="outside" />';
-    region = document.querySelector('#game-region')!;
-    api = attachInput(region, 1);
-  });
-  afterEach(() => api.detach());
+beforeEach(() => {
+  document.body.innerHTML = '<div id="game-region" tabindex="0"></div><input id="outside" />';
+  region = document.querySelector('#game-region')!;
+  api = attachInput(region, 1, KB_DEFAULTS);
+});
+afterEach(() => api.detach());
 
+describe('attachInput', () => {
   it('sees a key pressed on the game region', () => {
     region.dispatchEvent(key('keydown', 'KeyA'));
     expect(api.held(0, 'left')).toBe(true);
@@ -1373,7 +1678,7 @@ describe('attachInput', () => {
     expect(api.pressed(0, 'jump')).toBe(true);
   });
 
-  it('prevents the default action for keys it owns, so Space does not scroll the page', () => {
+  it('prevents the default for keys it owns, so Space does not scroll the page', () => {
     const ev = key('keydown', 'Space');
     region.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(true);
@@ -1400,7 +1705,7 @@ describe('attachInput', () => {
 
   it('gives two players different default keys', () => {
     api.detach();
-    api = attachInput(region, 2);
+    api = attachInput(region, 2, KB_DEFAULTS);
     region.dispatchEvent(key('keydown', 'KeyA'));
     region.dispatchEvent(key('keydown', 'ArrowLeft'));
     expect(api.held(0, 'left')).toBe(true);
@@ -1409,19 +1714,28 @@ describe('attachInput', () => {
     expect(api.held(0, 'left')).toBe(false);
     expect(api.held(1, 'left')).toBe(true);
   });
+
+  it('keeps two instances independent, so a detached one cannot answer for the live one', () => {
+    const other = attachInput(region, 1, KB_DEFAULTS);
+    other.detach();
+    region.dispatchEvent(key('keydown', 'KeyA'));
+    expect(api.held(0, 'left')).toBe(true);
+    expect(other.held(0, 'left')).toBe(false);
+  });
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 3: Run both to verify they fail**
 
 Run: `npx vitest run engine/input/`
-Expected: FAIL — unresolved imports for `state.js`, `latch.js`, `attach.js`.
+Expected: FAIL — unresolved imports for `actions.js`, `latch.js`, `keyboard.js`, `attach.js`.
 
-- [ ] **Step 3: Write `engine/input/state.ts`**
+- [ ] **Step 4: Write `engine/input/actions.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// input/state — runtime input state plus the generic query. Leaf, zero deps.
+// input/actions — the vocabulary of input, and the one query over it. Pure, zero deps, zero state.
+//
 // The eight actions are the tracer's, unchanged: someone who learned one game in the constellation
 // should not have to relearn the keys for the next.
 export type Action = 'up' | 'left' | 'down' | 'right' | 'run' | 'jump' | 'swap' | 'especial';
@@ -1430,31 +1744,33 @@ export const ACTIONS: readonly Action[] = ['up', 'left', 'down', 'right', 'run',
 /** One player's binding: action → the physical KeyboardEvent.code values that trigger it. */
 export type KeyScheme = Record<Action, string[]>;
 
-/** Physical keys held right now, by KeyboardEvent.code. Mutated by the keydown/keyup handlers. */
-export const keys = new Set<string>();
-
-/** Gamepad actions held this frame, per pad index. Mutated in place by the poll. */
+/** Gamepad actions held this frame. */
 export type PadState = Partial<Record<Action, boolean>>;
-export const padCur: Record<number, PadState> = {};
 
 /** Dead zone = the first HALF of the stick's travel. Ergonomics, not sensitivity (tracer's value). */
 export const PAD_DEAD = 0.5;
 
-/** Is this action held, by keyboard or by the associated pad? `pad = -1` means no pad. */
-export function held(scheme: KeyScheme, act: Action, pad: number): boolean {
+/**
+ * Is this action held, by keyboard or by the pad?
+ *
+ * The state arrives as arguments rather than living in this module. That is the difference between a
+ * module that hides something and a module that is a bag of globals: this one can be reasoned about,
+ * tested and used twice over without a cleanup ritual between uses.
+ */
+export function heldIn(scheme: KeyScheme, keys: ReadonlySet<string>, pad: PadState | null, act: Action): boolean {
   if (scheme[act].some((k) => keys.has(k))) return true;
-  return pad >= 0 && padCur[pad]?.[act] === true;
+  return pad?.[act] === true;
 }
 ```
 
-- [ ] **Step 4: Write `engine/input/latch.ts`**
+- [ ] **Step 5: Write `engine/input/latch.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// input/latch — edge detection over a polled boolean. Leaf, zero deps.
+// input/latch — edge detection over a polled boolean. Factory, zero deps.
 //
-// A held key is true on every frame. A menu that advances on "jump" would advance sixty times a
-// second without this. `pressed` fires on the false → true edge, `released` on true → false.
+// A held key is true on every frame. A menu that advances on "jump" would advance sixty times a second
+// without this. `pressed` fires on the false → true edge, `released` on true → false.
 export interface Latch {
   pressed(key: string, now: boolean): boolean;
   released(key: string, now: boolean): boolean;
@@ -1480,15 +1796,17 @@ export function makeLatch(): Latch {
 }
 ```
 
-- [ ] **Step 5: Write `engine/input/keyboard.ts`**
+- [ ] **Step 6: Write `engine/input/keyboard.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// input/keyboard — key schemes per player count, plus persistence. Depends only on storage.
-// Copied from the tracer's defaults so muscle memory carries across the constellation. No Alt,
-// AltGr, Ctrl or Shift anywhere: those collide with the browser and with assistive technology.
+// input/keyboard — key schemes per player count, plus persistence. Pure functions over an explicit
+// `kb` value; nothing here is stored at module scope.
+//
+// Copied from the tracer's defaults so muscle memory carries across the constellation. No Alt, AltGr,
+// Control or Shift anywhere: those collide with the browser and with assistive technology.
 import * as store from '../platform/storage.js';
-import type { Action, KeyScheme } from './state.js';
+import type { Action, KeyScheme } from './actions.js';
 
 export type KBDefaults = { solo: KeyScheme; p2: KeyScheme[]; p3: KeyScheme[]; p4: KeyScheme[] };
 
@@ -1499,6 +1817,8 @@ const SCHEMES4: KeyScheme[] = [
   { left: ['Numpad4'], right: ['Numpad6'], up: ['Numpad8'], down: ['Numpad5'], run: ['Numpad2'], jump: ['Numpad0'], swap: ['Numpad3'], especial: ['NumpadDecimal'] },
 ];
 
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
 export const KB_DEFAULTS: KBDefaults = {
   solo: {
     left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'],
@@ -1508,16 +1828,14 @@ export const KB_DEFAULTS: KBDefaults = {
     { left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'], run: ['KeyU'], jump: ['KeyJ'], swap: ['KeyI'], especial: ['KeyK'] },
     { left: ['ArrowLeft'], right: ['ArrowRight'], up: ['ArrowUp'], down: ['ArrowDown'], run: ['Numpad8'], jump: ['Numpad5'], swap: ['Numpad9'], especial: ['Numpad6'] },
   ],
-  p3: JSON.parse(JSON.stringify(SCHEMES4.slice(0, 3))) as KeyScheme[],
-  p4: JSON.parse(JSON.stringify(SCHEMES4)) as KeyScheme[],
+  p3: clone(SCHEMES4.slice(0, 3)),
+  p4: clone(SCHEMES4),
 };
 
-type SavedKB = Partial<KBDefaults>;
-
-/** Load the saved schemes ON TOP of the defaults, so a new action added later is never missing. */
+/** Load the saved schemes ON TOP of the defaults, so an action added later is never missing. */
 export function loadKB(): KBDefaults {
-  const d = JSON.parse(JSON.stringify(KB_DEFAULTS)) as KBDefaults;
-  const s = store.getJSON<SavedKB>(store.KEYS.kbcontrols, null);
+  const d = clone(KB_DEFAULTS);
+  const s = store.getJSON<Partial<KBDefaults>>(store.KEYS.kbcontrols, null);
   if (s) {
     if (s.solo) Object.assign(d.solo, s.solo);
     (['p2', 'p3', 'p4'] as const).forEach((g) => {
@@ -1529,43 +1847,40 @@ export function loadKB(): KBDefaults {
 }
 
 export function saveKB(next: KBDefaults): void { store.setJSON(store.KEYS.kbcontrols, next); }
-export function resetKB(): KBDefaults { store.remove(store.KEYS.kbcontrols); return JSON.parse(JSON.stringify(KB_DEFAULTS)) as KBDefaults; }
-
-// The live map. It is born with the defaults and does NOT read storage at import time: a test that
-// imports anything from this file would otherwise inherit the environment's localStorage, and a key
-// map leaking in from another case fails far from its cause.
-export let kb: KBDefaults = JSON.parse(JSON.stringify(KB_DEFAULTS)) as KBDefaults;
-export function initKB(): KBDefaults { kb = loadKB(); return kb; }
-export function setKB(next: KBDefaults): void { kb = next; }
+export function resetKB(): KBDefaults { store.remove(store.KEYS.kbcontrols); return clone(KB_DEFAULTS); }
 
 /** The schemes for a given player count. */
-export function schemesFor(players: number): KeyScheme[] {
+export function schemesFor(kb: KBDefaults, players: number): KeyScheme[] {
   if (players <= 1) return [kb.solo];
   if (players === 2) return kb.p2;
   if (players === 3) return kb.p3;
   return kb.p4;
 }
 
-/** Every physical code currently bound for this player count — what the handler may swallow. */
-export function ownedCodes(players: number): Set<string> {
+/** Every physical code bound for this player count — what the handler may swallow, and nothing more. */
+export function ownedCodes(kb: KBDefaults, players: number): Set<string> {
   const out = new Set<string>();
-  for (const s of schemesFor(players)) for (const act of Object.keys(s) as Action[]) for (const c of s[act]) out.add(c);
+  for (const s of schemesFor(kb, players)) {
+    for (const act of Object.keys(s) as Action[]) for (const c of s[act]) out.add(c);
+  }
   return out;
 }
 ```
 
-- [ ] **Step 6: Write `engine/input/attach.ts`**
+- [ ] **Step 7: Write `engine/input/attach.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// input/attach — binds the input state to a DOM element and to the gamepads.
+// input/attach — binds input to a DOM element and to the gamepads. Owns the key set and the pad state
+// PRIVATELY: no other module can reach them, which is the difference between this and the tracer's
+// exported mutable `keys`.
 //
 // Listeners go on #game-region, NEVER on window. On window the game swallows keys belonging to the
-// page: the skip link stops working, Space scrolls nothing, and a screen-reader user navigating the
-// surrounding document finds their keys eaten by a canvas they are not focused on.
+// page: the skip link stops working, and a screen-reader user navigating the surrounding document
+// finds their keys eaten by a canvas they are not focused on.
+import { heldIn, PAD_DEAD, type Action, type PadState } from './actions.js';
 import { makeLatch } from './latch.js';
-import { ownedCodes, schemesFor } from './keyboard.js';
-import { ACTIONS, held, keys, padCur, PAD_DEAD, type Action } from './state.js';
+import { ownedCodes, schemesFor, type KBDefaults } from './keyboard.js';
 
 export interface InputApi {
   held(pl: number, act: Action): boolean;
@@ -1573,10 +1888,12 @@ export interface InputApi {
   readonly players: number;
 }
 
-export function attachInput(el: HTMLElement, players: number): InputApi & { poll(): void; detach(): void } {
-  const schemes = schemesFor(players);
-  const owned = ownedCodes(players);
+export function attachInput(el: HTMLElement, players: number, kb: KBDefaults): InputApi & { poll(): void; detach(): void } {
+  const schemes = schemesFor(kb, players);
+  const owned = ownedCodes(kb, players);
   const latch = makeLatch();
+  const keys = new Set<string>();
+  const pads = new Map<number, PadState>();
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (!owned.has(e.code)) return;   // Tab, F5 and everything else stay the browser's
@@ -1591,50 +1908,49 @@ export function attachInput(el: HTMLElement, players: number): InputApi & { poll
   el.addEventListener('keyup', onKeyUp);
   el.addEventListener('blur', onBlur);
 
-  /** Read the gamepads into padCur. Call once per frame, before the game's update. */
-  function poll(): void {
-    const pads = navigator.getGamepads?.() ?? [];
-    for (let i = 0; i < pads.length; i++) {
-      const p = pads[i];
-      if (!p) { delete padCur[i]; continue; }
-      const ax = p.axes[0] ?? 0, ay = p.axes[1] ?? 0;
-      const b = (n: number): boolean => p.buttons[n]?.pressed === true;
-      padCur[i] = {
-        left: ax < -PAD_DEAD || b(14), right: ax > PAD_DEAD || b(15),
-        up: ay < -PAD_DEAD || b(12), down: ay > PAD_DEAD || b(13),
-        jump: b(0), run: b(2), swap: b(1), especial: b(3),
-      };
-    }
-  }
+  const schemeFor = (pl: number) => schemes[Math.min(pl, schemes.length - 1)]!;
+  const isHeld = (pl: number, act: Action): boolean => heldIn(schemeFor(pl), keys, pads.get(pl) ?? null, act);
 
   return {
     players,
-    held: (pl, act) => held(schemes[Math.min(pl, schemes.length - 1)]!, act, pl),
-    pressed: (pl, act) => latch.pressed(`${pl}:${act}`, held(schemes[Math.min(pl, schemes.length - 1)]!, act, pl)),
-    poll,
+    held: isHeld,
+    pressed: (pl, act) => latch.pressed(`${pl}:${act}`, isHeld(pl, act)),
+
+    /** Read the gamepads. Call once per frame, before the game's update. */
+    poll() {
+      const list = navigator.getGamepads?.() ?? [];
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (!p) { pads.delete(i); continue; }
+        const ax = p.axes[0] ?? 0, ay = p.axes[1] ?? 0;
+        const b = (n: number): boolean => p.buttons[n]?.pressed === true;
+        pads.set(i, {
+          left: ax < -PAD_DEAD || b(14), right: ax > PAD_DEAD || b(15),
+          up: ay < -PAD_DEAD || b(12), down: ay > PAD_DEAD || b(13),
+          jump: b(0), run: b(2), swap: b(1), especial: b(3),
+        });
+      }
+    },
+
     detach() {
       el.removeEventListener('keydown', onKeyDown);
       el.removeEventListener('keyup', onKeyUp);
       el.removeEventListener('blur', onBlur);
       keys.clear();
       latch.clear();
-      for (const k of Object.keys(padCur)) delete padCur[Number(k)];
+      pads.clear();
     },
   };
 }
-
-export { ACTIONS, type Action };
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [ ] **Step 8: Run the tests, typecheck and format**
 
 Run: `npx vitest run engine/input/`
-Expected: PASS. `state` 6, `latch` 4, `attach` 8.
+Expected: PASS. `actions` 7, `latch` 5, `keyboard` 8, `attach` 9.
 
-- [ ] **Step 8: Run typecheck**
-
-Run: `npx tsc --noEmit`
-Expected: no output, exit 0.
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
 
 - [ ] **Step 9: Commit**
 
@@ -1643,8 +1959,9 @@ git add engine/input/
 git commit -m "feat: add the eight-action input layer
 
 Schemes and the 0.5 dead zone come from the tracer so muscle memory carries
-across the constellation. Listeners bind to #game-region rather than window,
-and only codes the current scheme owns get preventDefault."
+across the constellation. Unlike the tracer, the key set and pad state are
+private to the attachInput instance and the module-level query is pure, so
+there is no cleanup ritual between tests and two instances cannot interfere."
 ```
 
 ---
@@ -1893,37 +2210,41 @@ is a constraint and an untested constraint is a wish."
 
 ---
 
-### Task 8: High contrast by sprite role
+
+### Task 8: High contrast by sprite role, and the Scene
 
 **Files:**
-- Create: `engine/render/high-contrast.ts`, `engine/render/sprites.ts`
-- Test: `engine/render/high-contrast.test.ts`, `engine/render/sprites.browser.test.ts`
+- Create: `engine/render/high-contrast.ts`, `engine/render/scene-pixi.ts`
+- Test: `engine/render/high-contrast.test.ts`, `engine/render/scene-pixi.browser.test.ts`
 
 **Interfaces:**
 - Consumes: `pixelCanvas`, `tex` from Task 7.
 - Produces:
-  - From `high-contrast.ts`: `type SpriteRole`, `type ContrastLevel`, `relativeLuminance(hex)`, `contrastRatio(a, b)`, `roleColor(role, level)`, `outlineColor(level)`, `HC_BG`, `getContrastLevel()`, `setContrastLevel(level)`, `onContrastChange(fn)`.
-  - From `sprites.ts`: `roleCanvas(spec, level)`, `makeSpriteApi(stage)` returning `{ make(spec), repaintAll(), clear() }`.
+  - Pure, from `high-contrast.ts`: `type SpriteRole`, `type ContrastLevel`, `relativeLuminance(hex)`, `contrastRatio(a, b)`, `roleColor(role, level)`, `outlineColor()`, `HC_BG`.
+  - Factory, from `high-contrast.ts`: `createVisualState(initial?): VisualState` with `level()`, `setLevel(l)`, `onChange(fn): () => void`.
+  - From `scene-pixi.ts`: `type SpriteSpec`, `type Handle`, `type Scene`, `roleCanvas(spec, level)`, and `createPixiScene(stage, visual): Scene & { destroy(): void }`.
 
-> This is the task the whole per-game economy rests on. A game says what a thing *means*
-> (`role: 'hazard'`) and never writes contrast code. When the player raises the contrast level, the
-> engine repaints every registered sprite: the game's own `paint` still draws the silhouette, but every
-> colour it asks for is replaced by the role's colour, and a one-pixel outline is added so adjacent
-> roles never merge into one blob.
+> Two things happen here and they are deliberately in one task, because neither is testable without
+> the other being decided.
 >
-> The colours are not hand-picked hex values hoping to be contrasty. Each role has a hue, and the
-> lightness is searched until the colour hits the exact WCAG luminance the level demands. The test then
-> measures the real ratio — if a colour fails 4.5:1, the suite fails.
+> **The palette is computed, not chosen.** Each role owns a hue; the lightness is bisected until the
+> colour's relative luminance is exactly what the target ratio demands. That makes the promise
+> checkable, and the test measures the real WCAG ratio instead of trusting hand-picked hex.
+>
+> **The `Scene` is the boundary that keeps PixiJS out of every game.** `add()` takes a description and
+> returns a `Handle` with three properties. A game moves and hides things; it cannot reach the renderer.
+> This is what lets `renderer: 'svg'` in `GameMeta` be a real escape hatch rather than a type that
+> promises what the contract cannot deliver.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing palette test**
 
 `engine/render/high-contrast.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
 import {
-  contrastRatio, getContrastLevel, HC_BG, onContrastChange, outlineColor,
-  relativeLuminance, roleColor, setContrastLevel, type ContrastLevel, type SpriteRole,
+  contrastRatio, createVisualState, HC_BG, outlineColor,
+  relativeLuminance, roleColor, type ContrastLevel, type SpriteRole,
 } from './high-contrast.js';
 
 const PAINTED: SpriteRole[] = ['player', 'ally', 'hazard', 'goal', 'pickup', 'ui', 'neutral'];
@@ -1968,8 +2289,7 @@ describe('roleColor', () => {
   });
 
   it('recesses the background role instead of raising it', () => {
-    const bg = roleColor('bg', 7)!;
-    expect(contrastRatio(bg, HC_BG)).toBeLessThan(3);
+    expect(contrastRatio(roleColor('bg', 7)!, HC_BG)).toBeLessThan(3);
   });
 
   it('keeps every painted role distinguishable from every other at the same level', () => {
@@ -1987,36 +2307,46 @@ describe('roleColor', () => {
     expect(roleColor('hazard', 4.5)).toBe(roleColor('hazard', 4.5));
   });
 
-  it('gives an outline that contrasts with the background at every level', () => {
-    for (const level of LEVELS) {
-      expect(contrastRatio(outlineColor(level), HC_BG)).toBeGreaterThanOrEqual(3);
-    }
+  it('gives an outline that contrasts with the background', () => {
+    expect(contrastRatio(outlineColor(), HC_BG)).toBeGreaterThanOrEqual(3);
   });
 });
 
-describe('contrast level state', () => {
-  it('starts off', () => {
-    setContrastLevel(0);
-    expect(getContrastLevel()).toBe(0);
+describe('createVisualState', () => {
+  it('starts off unless told otherwise', () => {
+    expect(createVisualState().level()).toBe(0);
+    expect(createVisualState(7).level()).toBe(7);
   });
 
-  it('notifies subscribers on change and not on a no-op set', () => {
-    setContrastLevel(0);
+  it('notifies on change and not on a no-op set', () => {
+    const v = createVisualState();
     let calls = 0;
-    const off = onContrastChange(() => calls++);
-    setContrastLevel(4.5);
+    v.onChange(() => calls++);
+    v.setLevel(4.5);
     expect(calls).toBe(1);
-    setContrastLevel(4.5);
+    v.setLevel(4.5);
     expect(calls).toBe(1);
+  });
+
+  it('stops notifying after unsubscribe', () => {
+    const v = createVisualState();
+    let calls = 0;
+    const off = v.onChange(() => calls++);
     off();
-    setContrastLevel(7);
-    expect(calls).toBe(1);
-    setContrastLevel(0);
+    v.setLevel(7);
+    expect(calls).toBe(0);
+  });
+
+  it('keeps two instances independent', () => {
+    const a = createVisualState();
+    const b = createVisualState();
+    a.setLevel(7);
+    expect(b.level()).toBe(0);
   });
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run --project node engine/render/high-contrast.test.ts`
 Expected: FAIL — `Failed to resolve import "./high-contrast.js"`.
@@ -2027,13 +2357,13 @@ Expected: FAIL — `Failed to resolve import "./high-contrast.js"`.
 // SPDX-License-Identifier: GPL-3.0-or-later
 // render/high-contrast — semantic roles resolved to colours that MEET a stated WCAG ratio.
 //
-// This inverts what the tracer does. There, contrast was retrofitted onto a finished platformer, so
-// the colour-blocking is welded to that game's four entities. Here every sprite is born through one
-// factory, so it can carry a role tag from the start and no game ever writes contrast code.
+// This inverts what the tracer does. There, contrast was retrofitted onto a finished platformer, so the
+// colour-blocking is welded to that game's four entities. Here every sprite is born through one factory,
+// so it can carry a role tag from the start and no game ever writes contrast code.
 //
-// The colours are computed, not chosen. Each role owns a hue; the lightness is searched until the
-// colour's relative luminance is exactly what the target ratio requires against the backdrop. That
-// makes the promise checkable, and the test checks it.
+// The colours are computed. Each role owns a hue; the lightness is bisected until the relative luminance
+// is what the target ratio requires against the backdrop. The test then measures the ratio, so the claim
+// is checked rather than asserted.
 
 export type SpriteRole = 'player' | 'ally' | 'hazard' | 'goal' | 'pickup' | 'bg' | 'ui' | 'neutral';
 /** 0 = off (the game's own art). Otherwise the WCAG contrast ratio the palette must meet. */
@@ -2042,7 +2372,7 @@ export type ContrastLevel = 0 | 3 | 4.5 | 7;
 /** The backdrop every ratio is measured against. High contrast forces the field to this colour. */
 export const HC_BG = '#000000';
 
-/** Hue and saturation per role. `ui` and `neutral` are greys, distinguished by lightness alone. */
+/** Hue and saturation per role. `ui` is a grey; `neutral` is desaturated but not grey. */
 const ROLE_HS: Record<Exclude<SpriteRole, 'bg'>, { h: number; s: number }> = {
   player: { h: 210, s: 1 },     // blue — the thing you are
   ally: { h: 150, s: 1 },       // green — safe
@@ -2050,10 +2380,10 @@ const ROLE_HS: Record<Exclude<SpriteRole, 'bg'>, { h: number; s: number }> = {
   goal: { h: 45, s: 1 },        // amber — where you are going
   pickup: { h: 300, s: 1 },     // magenta — take it
   ui: { h: 0, s: 0 },           // white-ish — chrome, never gameplay
-  neutral: { h: 180, s: 0.35 }, // desaturated cyan — scenery that still needs to be seen
+  neutral: { h: 180, s: 0.35 }, // desaturated cyan — scenery that still must be seen
 };
 
-/** The background role is RECESSED: it must not compete with anything the player must react to. */
+/** The background role is RECESSED: it must not compete with anything the player reacts to. */
 const BG_RECESSED = '#0b0b12';
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -2089,9 +2419,9 @@ function hslToHex(h: number, s: number, l: number): string {
 }
 
 /**
- * The lightness at which this hue reaches the luminance the ratio demands.
- * Luminance rises monotonically with HSL lightness, so a bisection always converges — and at l = 1
- * every hue is white, whose luminance is 1, so no target below 1 can be out of reach.
+ * The lightness at which this hue reaches a target luminance.
+ * Luminance rises monotonically with HSL lightness, so bisection always converges — and at l = 1 every
+ * hue is white, whose luminance is 1, so no target below 1 is out of reach.
  */
 function solveLightness(h: number, s: number, targetLum: number): number {
   let lo = 0, hi = 1;
@@ -2102,11 +2432,13 @@ function solveLightness(h: number, s: number, targetLum: number): number {
   return (lo + hi) / 2;
 }
 
+// Memoised because the result is a pure function of (role, level) and repainting a wall of bricks
+// would otherwise bisect forty times per brick.
 const cache = new Map<string, string>();
 
 /**
  * The colour this role must be painted at this contrast level, or null when contrast is off.
- * Against a black backdrop the ratio R needs luminance (0.05R - 0.05), which is what is solved for.
+ * Against a black backdrop, ratio R needs luminance (0.05R - 0.05), which is what is solved for.
  */
 export function roleColor(role: SpriteRole, level: ContrastLevel): string | null {
   if (level === 0) return null;
@@ -2115,62 +2447,67 @@ export function roleColor(role: SpriteRole, level: ContrastLevel): string | null
   const hit = cache.get(key);
   if (hit) return hit;
   const { h, s } = ROLE_HS[role];
-  const target = 0.05 * level - 0.05 + relativeLuminance(HC_BG);
-  const out = hslToHex(h, s, solveLightness(h, s, target));
+  const out = hslToHex(h, s, solveLightness(h, s, 0.05 * level - 0.05 + relativeLuminance(HC_BG)));
   cache.set(key, out);
   return out;
 }
 
-/** The one-pixel border drawn around every shape so two adjacent roles never read as one blob. */
-export function outlineColor(_level: ContrastLevel): string { return '#ffffff'; }
+/** The one-pixel border drawn around every shape, so two adjacent roles never read as one blob. */
+export function outlineColor(): string { return '#ffffff'; }
 
-let level: ContrastLevel = 0;
-const listeners = new Set<() => void>();
-
-export function getContrastLevel(): ContrastLevel { return level; }
-
-/** Set the level and notify. A no-op set does not notify — repainting every sprite is not free. */
-export function setContrastLevel(next: ContrastLevel): void {
-  if (next === level) return;
-  level = next;
-  for (const fn of listeners) fn();
+export interface VisualState {
+  level(): ContrastLevel;
+  setLevel(next: ContrastLevel): void;
+  onChange(fn: () => void): () => void;
 }
 
-/** Subscribe to level changes. Returns the unsubscribe function. */
-export function onContrastChange(fn: () => void): () => void {
-  listeners.add(fn);
-  return () => { listeners.delete(fn); };
+/** The current contrast level, owned by whoever creates it — the composition root, in practice. */
+export function createVisualState(initial: ContrastLevel = 0): VisualState {
+  let level = initial;
+  const listeners = new Set<() => void>();
+  return {
+    level: () => level,
+    setLevel(next) {
+      if (next === level) return;   // repainting every sprite is not free; a no-op set stays a no-op
+      level = next;
+      for (const fn of listeners) fn();
+    },
+    onChange(fn) {
+      listeners.add(fn);
+      return () => { listeners.delete(fn); };
+    },
+  };
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 4: Run the palette test to verify it passes**
 
 Run: `npx vitest run --project node engine/render/high-contrast.test.ts`
-Expected: PASS, 12 tests. Every role at every level provably meets its ratio.
+Expected: PASS, 13 tests. Every role at every level provably meets its ratio.
 
-- [ ] **Step 5: Write the failing sprite test**
+- [ ] **Step 5: Write the failing Scene test**
 
-`engine/render/sprites.browser.test.ts`:
+`engine/render/scene-pixi.browser.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Container } from 'pixi.js';
-import { makeSpriteApi, roleCanvas } from './sprites.js';
-import { roleColor, setContrastLevel } from './high-contrast.js';
-
-afterEach(() => setContrastLevel(0));
+import { createPixiScene, roleCanvas, type SpriteSpec } from './scene-pixi.js';
+import { createVisualState, roleColor } from './high-contrast.js';
 
 const hexAt = (cv: HTMLCanvasElement, x: number, y: number): string => {
   const d = cv.getContext('2d')!.getImageData(x, y, 1, 1).data;
   return d[3] === 0 ? 'transparent' : `#${[d[0], d[1], d[2]].map((v) => v!.toString(16).padStart(2, '0')).join('')}`;
 };
 
-const square = { role: 'hazard' as const, w: 4, h: 4, paint: (px: (x: number, y: number, w: number, h: number, c: string) => void) => px(1, 1, 2, 2, '#00ff00') };
+const square: SpriteSpec = {
+  role: 'hazard', w: 4, h: 4,
+  paint: (px) => px(1, 1, 2, 2, '#00ff00'),
+};
 
 describe('roleCanvas', () => {
   it('keeps the game colours when contrast is off', () => {
-    const cv = roleCanvas(square, 0);
-    expect(hexAt(cv, 1, 1)).toBe('#00ff00');
+    expect(hexAt(roleCanvas(square, 0), 1, 1)).toBe('#00ff00');
   });
 
   it('is the size the spec asked for when contrast is off', () => {
@@ -2179,10 +2516,8 @@ describe('roleCanvas', () => {
   });
 
   it('replaces every game colour with the role colour when contrast is on', () => {
-    const cv = roleCanvas(square, 4.5);
-    const expected = roleColor('hazard', 4.5)!;
-    // The shape is offset by one pixel because the outline grows the canvas by a border.
-    expect(hexAt(cv, 2, 2)).toBe(expected);
+    // Offset by one pixel: the outline grows the canvas by a border.
+    expect(hexAt(roleCanvas(square, 4.5), 2, 2)).toBe(roleColor('hazard', 4.5));
   });
 
   it('grows by one pixel of border on each side so the outline has somewhere to live', () => {
@@ -2191,73 +2526,117 @@ describe('roleCanvas', () => {
   });
 
   it('draws an outline around the silhouette', () => {
-    const cv = roleCanvas(square, 4.5);
-    expect(hexAt(cv, 1, 2)).toBe('#ffffff');   // immediately left of the shape
+    expect(hexAt(roleCanvas(square, 4.5), 1, 2)).toBe('#ffffff');
   });
 
   it('leaves the area outside the outline transparent', () => {
-    const cv = roleCanvas(square, 4.5);
-    expect(hexAt(cv, 0, 0)).toBe('transparent');
+    expect(hexAt(roleCanvas(square, 4.5), 0, 0)).toBe('transparent');
   });
 
   it('recesses a bg-role sprite instead of brightening it', () => {
-    const cv = roleCanvas({ ...square, role: 'bg' }, 7);
-    expect(hexAt(cv, 2, 2)).toBe(roleColor('bg', 7));
+    expect(hexAt(roleCanvas({ ...square, role: 'bg' }, 7), 2, 2)).toBe(roleColor('bg', 7));
   });
 });
 
-describe('makeSpriteApi', () => {
-  it('adds nothing to the stage by itself — the game positions what it makes', () => {
+describe('createPixiScene', () => {
+  it('adds a child to the stage for each handle', () => {
     const stage = new Container();
-    makeSpriteApi(stage);
+    const scene = createPixiScene(stage, createVisualState());
+    scene.add(square);
+    expect(stage.children.length).toBe(1);
+    scene.destroy();
+  });
+
+  it('returns a handle that exposes position and visibility AND NOTHING ELSE', () => {
+    const stage = new Container();
+    const scene = createPixiScene(stage, createVisualState());
+    const h = scene.add(square);
+    expect(Object.keys(h).sort()).toEqual(['visible', 'x', 'y']);
+    expect((h as Record<string, unknown>)['texture']).toBeUndefined();
+    scene.destroy();
+  });
+
+  it('moves the underlying sprite when the handle moves', () => {
+    const stage = new Container();
+    const scene = createPixiScene(stage, createVisualState());
+    const h = scene.add(square);
+    h.x = 12; h.y = 34;
+    expect([stage.children[0]!.x, stage.children[0]!.y]).toEqual([12, 34]);
+    scene.destroy();
+  });
+
+  it('hides the underlying sprite when the handle is hidden', () => {
+    const stage = new Container();
+    const scene = createPixiScene(stage, createVisualState());
+    const h = scene.add(square);
+    h.visible = false;
+    expect(stage.children[0]!.visible).toBe(false);
+    scene.destroy();
+  });
+
+  it('removes a handle from the stage', () => {
+    const stage = new Container();
+    const scene = createPixiScene(stage, createVisualState());
+    const h = scene.add(square);
+    scene.remove(h);
     expect(stage.children.length).toBe(0);
+    scene.destroy();
   });
 
-  it('produces a sprite sized to the spec', () => {
-    const api = makeSpriteApi(new Container());
-    const s = api.make(square);
-    expect([s.width, s.height]).toEqual([4, 4]);
-    api.clear();
+  it('clear removes everything', () => {
+    const stage = new Container();
+    const scene = createPixiScene(stage, createVisualState());
+    scene.add(square); scene.add(square);
+    scene.clear();
+    expect(stage.children.length).toBe(0);
+    scene.destroy();
   });
 
-  it('repaints every registered sprite when the contrast level changes', () => {
-    const api = makeSpriteApi(new Container());
-    const s = api.make(square);
-    const before = s.texture;
-    setContrastLevel(7);
-    expect(s.texture).not.toBe(before);
-    api.clear();
+  it('repaints every handle when the contrast level changes', () => {
+    const stage = new Container();
+    const visual = createVisualState();
+    const scene = createPixiScene(stage, visual);
+    scene.add(square);
+    const before = (stage.children[0] as { texture: unknown }).texture;
+    visual.setLevel(7);
+    expect((stage.children[0] as { texture: unknown }).texture).not.toBe(before);
+    scene.destroy();
   });
 
-  it('stops repainting sprites released by clear()', () => {
-    const api = makeSpriteApi(new Container());
-    const s = api.make(square);
-    api.clear();
-    const after = s.texture;
-    setContrastLevel(3);
-    expect(s.texture).toBe(after);
+  it('stops repainting after destroy, so a torn-down game leaves nothing behind', () => {
+    const stage = new Container();
+    const visual = createVisualState();
+    const scene = createPixiScene(stage, visual);
+    scene.add(square);
+    scene.destroy();
+    expect(() => visual.setLevel(3)).not.toThrow();
+    expect(stage.children.length).toBe(0);
   });
 });
 ```
 
-- [ ] **Step 6: Run the test to verify it fails**
+- [ ] **Step 6: Run it to verify it fails**
 
-Run: `npx vitest run --project browser engine/render/sprites.browser.test.ts`
-Expected: FAIL — `Failed to resolve import "./sprites.js"`.
+Run: `npx vitest run --project browser engine/render/scene-pixi.browser.test.ts`
+Expected: FAIL — `Failed to resolve import "./scene-pixi.js"`.
 
-- [ ] **Step 7: Write `engine/render/sprites.ts`**
+- [ ] **Step 7: Write `engine/render/scene-pixi.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// render/sprites — the one factory every game's art goes through.
+// render/scene-pixi — the PixiJS implementation of the drawing contract.
 //
-// A game describes a shape and says what it MEANS. It never picks contrast colours, never subscribes
-// to the accessibility settings, and never repaints. Because every sprite is registered here, raising
-// the contrast level repaints all of them at once — which is the whole reason a game costs 30 lines
-// of accessibility instead of 300.
+// The contract is the point. `Scene` is four methods and `Handle` is three properties, and neither
+// mentions PixiJS. Handing a game a PIXI.Sprite would pin 383 games to one library's API and would
+// contradict the renderer escape hatch in GameMeta: a game declaring renderer 'svg' would still be
+// holding a Pixi object. A second renderer implements this same file's exported types and nothing in
+// any game changes.
+//
+// The handle is a real wrapper, not the sprite widened by a type. A structural type would still hand
+// over the live object, and `as any` would reach straight through it.
 import { Sprite, type Container, type Texture } from 'pixi.js';
 import { pixelCanvas, tex } from './canvas.js';
-import { getContrastLevel, onContrastChange, outlineColor, roleColor, type ContrastLevel, type SpriteRole } from './high-contrast.js';
+import { outlineColor, roleColor, type ContrastLevel, type SpriteRole, type VisualState } from './high-contrast.js';
 
 export type PixelBrush = (x: number, y: number, w: number, h: number, col: string) => void;
 
@@ -2268,21 +2647,30 @@ export interface SpriteSpec {
   paint: (px: PixelBrush) => void;
 }
 
+/** An opaque drawable. A game moves and hides it; it cannot reach the renderer through it. */
+export interface Handle { x: number; y: number; visible: boolean }
+
+export interface Scene {
+  add(spec: SpriteSpec): Handle;
+  remove(h: Handle): void;
+  clear(): void;
+}
+
 /**
  * Render one spec at one contrast level.
  *
  * Off: the game's own painter runs untouched.
  *
- * On: the painter runs three times over a canvas grown by a one-pixel border. First eight offset
- * passes in the outline colour, which together form a sticker outline around whatever silhouette the
- * game drew; then one centred pass in the role colour. The game's requested colours are discarded —
- * that is the point, since two roles that happen to share a hue must not read as the same thing.
+ * On: the painter runs nine times over a canvas grown by a one-pixel border — eight offset passes in
+ * the outline colour, which together form a sticker outline around whatever silhouette the game drew,
+ * then one centred pass in the role colour. The game's requested colours are discarded, which is the
+ * point: two roles that happen to share a hue must not read as the same thing.
  */
 export function roleCanvas(spec: SpriteSpec, level: ContrastLevel): HTMLCanvasElement {
   if (level === 0) return pixelCanvas(spec.w, spec.h, spec.paint);
 
   const fill = roleColor(spec.role, level)!;
-  const line = outlineColor(level);
+  const line = outlineColor();
   const OFFSETS: ReadonlyArray<readonly [number, number]> = [
     [0, 0], [2, 0], [0, 2], [2, 2], [1, 0], [0, 1], [2, 1], [1, 2],
   ];
@@ -2293,71 +2681,84 @@ export function roleCanvas(spec: SpriteSpec, level: ContrastLevel): HTMLCanvasEl
   });
 }
 
-export interface SpriteApi {
-  make(spec: SpriteSpec): Sprite;
-  repaintAll(): void;
-  clear(): void;
-}
-
 /**
- * Build the sprite API for one game session. `clear()` releases everything and unsubscribes, so a
- * game that is torn down cannot leave sprites behind that repaint forever.
+ * Build the scene for one game session. `destroy()` releases every sprite and unsubscribes, so a game
+ * that is torn down cannot leave drawables behind that repaint forever.
  */
-export function makeSpriteApi(_stage: Container): SpriteApi {
-  const registry = new Map<Sprite, SpriteSpec>();
+export function createPixiScene(stage: Container, visual: VisualState): Scene & { destroy(): void } {
+  const sprites = new Map<Handle, Sprite>();
+  const specs = new Map<Handle, SpriteSpec>();
 
-  const paint = (spec: SpriteSpec): Texture => tex(roleCanvas(spec, getContrastLevel()));
+  const paint = (spec: SpriteSpec): Texture => tex(roleCanvas(spec, visual.level()));
 
-  function repaintAll(): void {
-    for (const [sprite, spec] of registry) {
+  const unsubscribe = visual.onChange(() => {
+    for (const [handle, sprite] of sprites) {
       const old = sprite.texture;
-      sprite.texture = paint(spec);
+      sprite.texture = paint(specs.get(handle)!);
       old.destroy(true);
     }
+  });
+
+  function detach(handle: Handle): void {
+    const sprite = sprites.get(handle);
+    if (!sprite) return;
+    stage.removeChild(sprite);
+    sprite.destroy({ texture: true, baseTexture: true });
+    sprites.delete(handle);
+    specs.delete(handle);
   }
 
-  const unsubscribe = onContrastChange(repaintAll);
-
   return {
-    make(spec) {
-      const s = new Sprite(paint(spec));
-      // The border added in high-contrast mode must not shift the game's hitbox or layout, so the
-      // sprite is anchored on the shape's own top-left rather than the texture's.
-      s.anchor.set(0, 0);
-      s.width = spec.w;
-      s.height = spec.h;
-      registry.set(s, spec);
-      return s;
+    add(spec) {
+      const sprite = new Sprite(paint(spec));
+      sprite.anchor.set(0, 0);
+      // The border added in high-contrast mode must not shift the game's layout, so the sprite keeps
+      // the spec's dimensions rather than the texture's.
+      sprite.width = spec.w;
+      sprite.height = spec.h;
+      stage.addChild(sprite);
+
+      const handle: Handle = {
+        get x() { return sprite.x; },
+        set x(v) { sprite.x = v; },
+        get y() { return sprite.y; },
+        set y(v) { sprite.y = v; },
+        get visible() { return sprite.visible; },
+        set visible(v) { sprite.visible = v; },
+      };
+      sprites.set(handle, sprite);
+      specs.set(handle, spec);
+      return handle;
     },
-    repaintAll,
-    clear() {
-      unsubscribe();
-      registry.clear();
-    },
+
+    remove: detach,
+    clear() { for (const handle of [...sprites.keys()]) detach(handle); },
+    destroy() { unsubscribe(); for (const handle of [...sprites.keys()]) detach(handle); },
   };
 }
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [ ] **Step 8: Run everything, typecheck and format**
 
 Run: `npx vitest run engine/render/`
-Expected: PASS. `canvas` 4, `mount` 10, `high-contrast` 12, `sprites` 11.
+Expected: PASS. `canvas` 4, `mount` 10, `high-contrast` 13, `scene-pixi` 15.
 
-- [ ] **Step 9: Run typecheck and the full suite**
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
 
-Run: `npx tsc --noEmit && npx vitest run`
-Expected: no typecheck output; every test passes.
-
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add engine/render/high-contrast.ts engine/render/high-contrast.test.ts engine/render/sprites.ts engine/render/sprites.browser.test.ts
-git commit -m "feat: high contrast resolved from sprite role tags
+git add engine/render/high-contrast.ts engine/render/high-contrast.test.ts engine/render/scene-pixi.ts engine/render/scene-pixi.browser.test.ts
+git commit -m "feat: high contrast from role tags, behind a renderer-agnostic Scene
 
 Each role owns a hue and the lightness is solved until the colour hits the
-luminance the target ratio demands, so the test can measure the real WCAG
-ratio rather than trust hand-picked hex. Games declare meaning; the engine
-repaints every registered sprite when the level changes."
+luminance the target ratio demands, so the test measures the real WCAG ratio
+instead of trusting hand-picked hex.
+
+Scene and Handle mention no PixiJS type. The handle is a real wrapper rather
+than the sprite widened by a type, because a structural type still hands over
+the live object and 'as any' reaches straight through it."
 ```
 
 ---
@@ -2371,63 +2772,26 @@ repaints every registered sprite when the level changes."
 **Interfaces:**
 - Consumes: `storage` (`KEYS.viz`) from Task 2.
 - Produces:
-  - From `cvd-matrices.ts` (lifted): `type CvdKey`, `CVD_KEYS`, `CVD_MATRIX`, `CVD_SVG_ID`, `cvdMatrixValues(k)`, `installCvdFilters(host): number`.
-  - From `viz.ts`: `type VizKey`, `VIZ_MODES`, `vizFilter(key)`, `vizZoom(key)`, `getViz()`, `setViz(key, target)`, `initViz(host, target)`.
+  - Lifted, from `cvd-matrices.ts`: `type CvdKey`, `CVD_KEYS`, `CVD_MATRIX`, `CVD_SVG_ID`, `cvdMatrixValues(k)`, `installCvdFilters(host): number`.
+  - Pure, from `viz.ts`: `type VizKey`, `VIZ_MODES`, `vizFilter(key)`, `vizZoom(key)`.
+  - Factory, from `viz.ts`: `createViz(target: HTMLElement): Viz` with `mode()`, `set(key)`, `restore()`.
 
 > `cvd-matrices.ts` is copied verbatim from `<TRACER>/app/js/render/cvd-matrices.ts` — 120 numbers from
 > Machado 2009 (simulation) and Fidaner et al. (correction), which nobody should retype. Only the header
 > comment is translated.
 >
 > `viz.ts` is **not** the tracer's `viz-modes.ts`. That file carries pt-BR `nome`/`desc` strings inline,
-> which contradicts D10: every visible string in this project resolves through `t()`. So the mode table
-> is rewritten with i18n keys, and its sixteen tracer modes are cut to the eight that apply without a
-> game-specific renderer.
+> which contradicts the rule that every visible string resolves through `t()`. The mode table is
+> rewritten with i18n keys and trimmed to the eight modes that need no game-specific renderer. It is a
+> factory over its target element, and it takes **only** what it uses: the first draft carried a `host`
+> parameter it never touched, which the audit called out as a lie in an interface.
 
 - [ ] **Step 1: Copy `cvd-matrices.ts` from the tracer**
 
 Copy `<TRACER>/app/js/render/cvd-matrices.ts` to `engine/render/cvd-matrices.ts`. Translate the header
-comment to English. Change nothing else — the matrices, `CVD_SVG_ID` and `installCvdFilters` are used
-exactly as they are.
+comment to English. Change nothing else.
 
-- [ ] **Step 2: Add the shell i18n keys for the modes**
-
-Append to `engine/i18n/pt.ts`:
-```ts
-  'viz.none': 'Cores normais',
-  'viz.simProtan': 'Simular protanopia',
-  'viz.simDeuter': 'Simular deuteranopia',
-  'viz.simTritan': 'Simular tritanopia',
-  'viz.fixProtan': 'Corrigir para protanopia',
-  'viz.fixDeuter': 'Corrigir para deuteranopia',
-  'viz.fixTritan': 'Corrigir para tritanopia',
-  'viz.lowVision': 'Baixa visão (ampliar)',
-```
-
-Append to `engine/i18n/en.ts`:
-```ts
-  'viz.none': 'Normal colours',
-  'viz.simProtan': 'Simulate protanopia',
-  'viz.simDeuter': 'Simulate deuteranopia',
-  'viz.simTritan': 'Simulate tritanopia',
-  'viz.fixProtan': 'Correct for protanopia',
-  'viz.fixDeuter': 'Correct for deuteranopia',
-  'viz.fixTritan': 'Correct for tritanopia',
-  'viz.lowVision': 'Low vision (magnify)',
-```
-
-Append to `engine/i18n/es.ts`:
-```ts
-  'viz.none': 'Colores normales',
-  'viz.simProtan': 'Simular protanopía',
-  'viz.simDeuter': 'Simular deuteranopía',
-  'viz.simTritan': 'Simular tritanopía',
-  'viz.fixProtan': 'Corregir para protanopía',
-  'viz.fixDeuter': 'Corregir para deuteranopía',
-  'viz.fixTritan': 'Corregir para tritanopía',
-  'viz.lowVision': 'Baja visión (ampliar)',
-```
-
-- [ ] **Step 3: Write the failing node test**
+- [ ] **Step 2: Write the failing node test**
 
 `engine/render/viz.test.ts`:
 ```ts
@@ -2493,14 +2857,14 @@ describe('viz modes', () => {
 });
 ```
 
-- [ ] **Step 4: Write the failing browser test**
+- [ ] **Step 3: Write the failing browser test**
 
 `engine/render/viz.browser.test.ts`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { installCvdFilters } from './cvd-matrices.js';
-import { getViz, initViz, setViz } from './viz.js';
+import { createViz } from './viz.js';
 
 let host: HTMLElement;
 let target: HTMLElement;
@@ -2508,7 +2872,11 @@ let target: HTMLElement;
 beforeEach(() => {
   vi.stubGlobal('localStorage', (() => {
     const m = new Map<string, string>();
-    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); } };
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => { m.set(k, v); },
+      removeItem: (k: string) => { m.delete(k); },
+    };
   })());
   document.body.innerHTML = '<div id="filters"></div><div id="region"></div>';
   host = document.querySelector('#filters')!;
@@ -2526,55 +2894,68 @@ describe('installCvdFilters', () => {
   });
 });
 
-describe('viz application', () => {
+describe('createViz', () => {
   it('applies no filter in the default mode', () => {
-    initViz(host, target);
-    expect(getViz()).toBe('none');
+    const viz = createViz(target);
+    expect(viz.mode()).toBe('none');
     expect(target.style.filter).toBe('');
   });
 
   it('applies the SVG filter reference for a cvd mode', () => {
-    initViz(host, target);
-    setViz('fix-deuter', target);
+    createViz(target).set('fix-deuter');
     expect(target.style.filter).toContain('url(#cvd-');
   });
 
   it('applies a zoom transform in low vision and removes it on return', () => {
-    initViz(host, target);
-    setViz('low-vision', target);
+    const viz = createViz(target);
+    viz.set('low-vision');
     expect(target.style.transform).toContain('scale(');
-    setViz('none', target);
+    viz.set('none');
     expect(target.style.transform).toBe('');
   });
 
-  it('persists the choice and restores it on the next init', () => {
-    initViz(host, target);
-    setViz('sim-tritan', target);
+  it('persists the choice, and restore() brings it back on a fresh instance', () => {
+    createViz(target).set('sim-tritan');
     const fresh = document.createElement('div');
-    initViz(host, fresh);
-    expect(getViz()).toBe('sim-tritan');
+    const viz = createViz(fresh);
+    viz.restore();
+    expect(viz.mode()).toBe('sim-tritan');
     expect(fresh.style.filter).toContain('url(#cvd-');
+  });
+
+  it('falls back to none when the stored mode is nonsense', () => {
+    localStorage.setItem('demos.viz', 'not-a-mode');
+    const viz = createViz(target);
+    viz.restore();
+    expect(viz.mode()).toBe('none');
+  });
+
+  it('keeps two instances independent', () => {
+    const other = document.createElement('div');
+    const a = createViz(target);
+    const b = createViz(other);
+    a.set('sim-protan');
+    expect(b.mode()).toBe('none');
+    expect(other.style.filter).toBe('');
   });
 });
 ```
 
-- [ ] **Step 5: Run both tests to verify they fail**
+- [ ] **Step 4: Run both to verify they fail**
 
 Run: `npx vitest run engine/render/viz`
 Expected: FAIL — `Failed to resolve import "./viz.js"`.
 
-- [ ] **Step 6: Write `engine/render/viz.ts`**
+- [ ] **Step 5: Write `engine/render/viz.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 // render/viz — the visual accessibility modes that cost a game nothing.
 //
-// These apply to the CANVAS ELEMENT, not to anything a game draws: a CSS filter over the whole
-// surface, plus a magnification transform. So every one of the 383 games gets colour-blindness
-// simulation, colour-blindness correction and low-vision magnification without a line of its own.
+// These apply to the CANVAS ELEMENT, not to anything a game draws: a CSS filter over the whole surface
+// plus a magnification transform. So every one of the 383 games gets colour-blindness simulation,
+// colour-blindness correction and low-vision magnification without a line of its own.
 //
-// Not the tracer's viz-modes.ts. That table carries pt-BR labels inline; here every visible string is
-// an i18n key, and the sixteen tracer modes are cut to the eight that need no game-specific renderer.
 // High contrast is NOT here — it is a repaint, not a filter, and lives in high-contrast.ts.
 import * as store from '../platform/storage.js';
 import { CVD_SVG_ID, type CvdKey } from './cvd-matrices.js';
@@ -2584,7 +2965,7 @@ export type VizKey = 'none' | CvdKey | 'low-vision';
 export interface VizMode {
   key: VizKey;
   kind: 'none' | 'cvd' | 'zoom';
-  /** i18n key for the label. Never a literal string — see D10. */
+  /** i18n key for the label. Never a literal string. */
   i18nKey: string;
 }
 
@@ -2607,8 +2988,7 @@ const LOW_VISION_ZOOM = 1.5;
 /** The CSS `filter` value for a mode, or '' for none. Unknown keys degrade to none. */
 export function vizFilter(key: VizKey): string {
   const m = BY_KEY.get(key);
-  if (!m || m.kind !== 'cvd') return '';
-  return `url(#${CVD_SVG_ID[key as CvdKey]})`;
+  return m?.kind === 'cvd' ? `url(#${CVD_SVG_ID[key as CvdKey]})` : '';
 }
 
 /** The magnification for a mode. Unknown keys degrade to 1. */
@@ -2616,47 +2996,61 @@ export function vizZoom(key: VizKey): number {
   return BY_KEY.get(key)?.kind === 'zoom' ? LOW_VISION_ZOOM : 1;
 }
 
-let current: VizKey = 'none';
-export function getViz(): VizKey { return current; }
-
-/** Apply a mode to the target element and persist the choice. */
-export function setViz(key: VizKey, target: HTMLElement): void {
-  current = BY_KEY.has(key) ? key : 'none';
-  store.set(store.KEYS.viz, current);
-  const filter = vizFilter(current);
-  const zoom = vizZoom(current);
-  target.style.filter = filter;
-  // Empty string rather than `scale(1)`: a lingering transform creates a containing block and a
-  // stacking context, which silently changes how the pause dialog above the canvas is positioned.
-  target.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
-  target.style.transformOrigin = zoom === 1 ? '' : 'center center';
+export interface Viz {
+  mode(): VizKey;
+  set(key: VizKey): void;
+  /** Re-apply the persisted mode. Separate from `set` so boot does not have to know the stored value. */
+  restore(): void;
 }
 
-/** Boot: inject the filter definitions into `host` and restore the saved mode onto `target`. */
-export function initViz(host: Element | null, target: HTMLElement): void {
-  void host; // filters are installed by the caller via installCvdFilters; kept for call-site symmetry
-  const saved = store.get(store.KEYS.viz, null);
-  setViz(saved && BY_KEY.has(saved) ? (saved as VizKey) : 'none', target);
+export function createViz(target: HTMLElement): Viz {
+  let current: VizKey = 'none';
+
+  const apply = (key: VizKey): void => {
+    current = BY_KEY.has(key) ? key : 'none';
+    const zoom = vizZoom(current);
+    target.style.filter = vizFilter(current);
+    // Empty string rather than `scale(1)`: a lingering transform creates a containing block and a
+    // stacking context, which silently changes how the pause dialog above the canvas is positioned.
+    target.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+    target.style.transformOrigin = zoom === 1 ? '' : 'center center';
+  };
+
+  return {
+    mode: () => current,
+    set(key) {
+      apply(key);
+      store.set(store.KEYS.viz, current);
+    },
+    restore() {
+      const saved = store.get(store.KEYS.viz, null);
+      apply(saved && BY_KEY.has(saved) ? (saved as VizKey) : 'none');
+    },
+  };
 }
 ```
 
-- [ ] **Step 7: Run both tests to verify they pass**
+- [ ] **Step 6: Run both, typecheck and format**
 
 Run: `npx vitest run engine/render/viz`
-Expected: PASS. `viz` node 9, `viz` browser 7.
+Expected: PASS. node 9, browser 8.
 
-- [ ] **Step 8: Commit**
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add engine/render/cvd-matrices.ts engine/render/viz.ts engine/render/viz.test.ts engine/render/viz.browser.test.ts engine/i18n/
+git add engine/render/cvd-matrices.ts engine/render/viz.ts engine/render/viz.test.ts engine/render/viz.browser.test.ts
 git commit -m "feat: add colour-vision and low-vision filters
 
-The 120 Machado/Fidaner matrices come from the tracer untouched. The mode
-table is rewritten with i18n keys instead of the tracer's inline pt-BR
-labels, and trimmed to the modes that need no game-specific renderer."
+The 120 Machado/Fidaner matrices come from the tracer untouched. The mode table
+is rewritten with i18n keys instead of the tracer's inline pt-BR labels, and it
+is a factory that takes only the element it actually touches."
 ```
 
 ---
+
 
 ### Task 10: The accessible shell and the router
 
@@ -2981,6 +3375,7 @@ never reach outside the games folder."
 
 ---
 
+
 ### Task 11: HUD, pause dialog and audio
 
 **Files:**
@@ -2988,16 +3383,19 @@ never reach outside the games folder."
 - Test: `engine/shell/hud.browser.test.ts`, `engine/shell/pause.browser.test.ts`, `engine/platform/audio.test.ts`
 
 **Interfaces:**
-- Consumes: `$` from Task 2, `t` from Task 4, `srSay` from Task 5.
+- Consumes: nothing.
 - Produces:
-  - From `hud.ts`: `setTitle(text)`, `setScore(n)`, `resetHud()`.
-  - From `pause.ts`: `type PauseAction = 'resume' | 'restart' | 'quit'`, `openPause(onAction): void`, `closePause(): void`, `isPaused(): boolean`.
-  - From `audio.ts`: `beep(freq: number, ms: number): void`, `muteAudio(on: boolean): void`.
+  - `createHud(root: ParentNode): Hud` with `setTitle(text)`, `setScore(n)`, `reset()`.
+  - `createPause(panel: HTMLElement): Pause` with `open(onAction)`, `close()`, `isOpen()`, and `type PauseAction = 'resume' | 'restart' | 'quit'`.
+  - `createAudio(): Audio` with `beep(freq, ms)` and `setMuted(on)`.
 
-> The pause dialog is where keyboard accessibility is usually lost. Three things must hold and are
-> therefore tested: focus moves into the dialog when it opens, Tab cannot escape it while it is open,
-> and focus returns to whatever had it when the dialog closes. A modal that a keyboard user can Tab
-> out of is a modal that traps them behind an invisible wall.
+> All three were module singletons in the first draft; all three are factories now. `pause` is the one
+> where it mattered most: its module-level `open` flag meant a test had to call `closePause()` in
+> `beforeEach` to undo the previous case, which is the receipt for shared state.
+>
+> Three properties make the dialog usable without a mouse, and all three are tested: focus enters the
+> dialog on open, Tab cycles inside it and cannot reach the page behind, and focus returns where it came
+> from on close. A dialog missing the third strands a keyboard user at the top of the document.
 
 - [ ] **Step 1: Write the failing HUD test**
 
@@ -3005,42 +3403,51 @@ never reach outside the games folder."
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetHud, setScore, setTitle } from './hud.js';
+import { createHud } from './hud.js';
 
 beforeEach(() => {
   document.body.innerHTML = '<h1 id="game-title"></h1><strong id="hud-score" aria-live="off">0</strong>';
 });
 
-describe('hud', () => {
+describe('createHud', () => {
   it('writes the title', () => {
-    setTitle('Snake');
+    createHud(document).setTitle('Snake');
     expect(document.querySelector('#game-title')!.textContent).toBe('Snake');
   });
 
-  it('also writes the title into the document title, so the browser tab is not generic', () => {
-    setTitle('Pong');
+  it('also writes the document title, so the browser tab is not generic', () => {
+    createHud(document).setTitle('Pong');
     expect(document.title).toContain('Pong');
   });
 
   it('writes the score', () => {
-    setScore(42);
+    createHud(document).setScore(42);
     expect(document.querySelector('#hud-score')!.textContent).toBe('42');
   });
 
   it('leaves the score out of the live region, so sixty points are not sixty announcements', () => {
-    setScore(1);
+    createHud(document).setScore(1);
     expect(document.querySelector('#hud-score')!.getAttribute('aria-live')).toBe('off');
   });
 
   it('resets the score to zero', () => {
-    setScore(9);
-    resetHud();
+    const hud = createHud(document);
+    hud.setScore(9);
+    hud.reset();
+    expect(document.querySelector('#hud-score')!.textContent).toBe('0');
+  });
+
+  it('writes into the root it was given', () => {
+    const frag = document.createElement('div');
+    frag.innerHTML = '<strong id="hud-score"></strong>';
+    createHud(frag).setScore(5);
+    expect(frag.querySelector('#hud-score')!.textContent).toBe('5');
     expect(document.querySelector('#hud-score')!.textContent).toBe('0');
   });
 
   it('does not throw when the elements are missing', () => {
-    document.body.innerHTML = '';
-    expect(() => { setTitle('x'); setScore(1); resetHud(); }).not.toThrow();
+    const hud = createHud(document.createElement('div'));
+    expect(() => { hud.setTitle('x'); hud.setScore(1); hud.reset(); }).not.toThrow();
   });
 });
 ```
@@ -3051,7 +3458,7 @@ describe('hud', () => {
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { closePause, isPaused, openPause, type PauseAction } from './pause.js';
+import { createPause, type PauseAction } from './pause.js';
 
 const MARKUP = `
   <button id="before">outside</button>
@@ -3071,74 +3478,90 @@ const MARKUP = `
 const tab = (shift = false): KeyboardEvent =>
   new KeyboardEvent('keydown', { key: 'Tab', shiftKey: shift, bubbles: true, cancelable: true });
 
-beforeEach(() => { document.body.innerHTML = MARKUP; closePause(); });
+let panel: HTMLElement;
+let pause: ReturnType<typeof createPause>;
 
-describe('pause dialog', () => {
+/** No cleanup ritual: each test builds its own instance over its own markup. */
+beforeEach(() => {
+  document.body.innerHTML = MARKUP;
+  panel = document.querySelector('#pause')!;
+  pause = createPause(panel);
+});
+
+describe('createPause', () => {
   it('starts closed', () => {
-    expect(isPaused()).toBe(false);
-    expect(document.querySelector('#pause')!.hasAttribute('hidden')).toBe(true);
+    expect(pause.isOpen()).toBe(false);
+    expect(panel.hasAttribute('hidden')).toBe(true);
   });
 
   it('shows the overlay when opened', () => {
-    openPause(() => {});
-    expect(isPaused()).toBe(true);
-    expect(document.querySelector('#pause')!.hasAttribute('hidden')).toBe(false);
+    pause.open(() => {});
+    expect(pause.isOpen()).toBe(true);
+    expect(panel.hasAttribute('hidden')).toBe(false);
   });
 
   it('moves focus into the dialog on open', () => {
-    openPause(() => {});
+    pause.open(() => {});
     expect(document.activeElement).toBe(document.querySelector('[data-act="resume"]'));
   });
 
   it('returns focus to whatever had it before, on close', () => {
     const before = document.querySelector<HTMLElement>('#before')!;
     before.focus();
-    openPause(() => {});
-    closePause();
+    pause.open(() => {});
+    pause.close();
     expect(document.activeElement).toBe(before);
   });
 
   it('wraps Tab from the last item back to the first', () => {
-    openPause(() => {});
+    pause.open(() => {});
     document.querySelector<HTMLElement>('[data-act="quit"]')!.focus();
-    document.querySelector('#pause')!.dispatchEvent(tab());
+    panel.dispatchEvent(tab());
     expect(document.activeElement).toBe(document.querySelector('[data-act="resume"]'));
   });
 
   it('wraps Shift+Tab from the first item back to the last', () => {
-    openPause(() => {});
+    pause.open(() => {});
     document.querySelector<HTMLElement>('[data-act="resume"]')!.focus();
-    document.querySelector('#pause')!.dispatchEvent(tab(true));
+    panel.dispatchEvent(tab(true));
     expect(document.activeElement).toBe(document.querySelector('[data-act="quit"]'));
   });
 
   it('reports the action of the button that was clicked', () => {
     const seen: PauseAction[] = [];
-    openPause((a) => seen.push(a));
+    pause.open((a) => seen.push(a));
     document.querySelector<HTMLElement>('[data-act="restart"]')!.click();
     expect(seen).toEqual(['restart']);
   });
 
   it('closes itself on resume', () => {
-    openPause(() => {});
+    pause.open(() => {});
     document.querySelector<HTMLElement>('[data-act="resume"]')!.click();
-    expect(isPaused()).toBe(false);
+    expect(pause.isOpen()).toBe(false);
   });
 
   it('resumes on Escape', () => {
     const seen: PauseAction[] = [];
-    openPause((a) => seen.push(a));
-    document.querySelector('#pause')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    pause.open((a) => seen.push(a));
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(seen).toEqual(['resume']);
-    expect(isPaused()).toBe(false);
+    expect(pause.isOpen()).toBe(false);
   });
 
   it('ignores a second open while already paused', () => {
     const first = vi.fn();
-    openPause(first);
-    openPause(vi.fn());
+    pause.open(first);
+    pause.open(vi.fn());
     document.querySelector<HTMLElement>('[data-act="quit"]')!.click();
     expect(first).toHaveBeenCalledWith('quit');
+  });
+
+  it('detaches its listeners on destroy', () => {
+    const seen: PauseAction[] = [];
+    pause.open((a) => seen.push(a));
+    pause.destroy();
+    document.querySelector<HTMLElement>('[data-act="quit"]')!.click();
+    expect(seen).toEqual([]);
   });
 });
 ```
@@ -3149,7 +3572,7 @@ describe('pause dialog', () => {
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { beep, muteAudio } from './audio.js';
+import { createAudio } from './audio.js';
 
 const started: number[] = [];
 
@@ -3163,38 +3586,47 @@ class FakeOsc {
 
 beforeEach(() => {
   started.length = 0;
-  muteAudio(false);
   vi.stubGlobal('AudioContext', class {
     currentTime = 0;
     destination = {};
     createOscillator(): FakeOsc { return new FakeOsc(); }
-    createGain() { return { gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
+    createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
   });
 });
 
-describe('audio', () => {
+describe('createAudio', () => {
   it('plays a tone at the requested frequency', () => {
-    beep(440, 50);
+    createAudio().beep(440, 50);
     expect(started).toEqual([440]);
   });
 
   it('plays nothing while muted', () => {
-    muteAudio(true);
-    beep(440, 50);
+    const a = createAudio();
+    a.setMuted(true);
+    a.beep(440, 50);
     expect(started).toEqual([]);
   });
 
   it('resumes playing when unmuted', () => {
-    muteAudio(true);
-    beep(440, 50);
-    muteAudio(false);
-    beep(880, 50);
+    const a = createAudio();
+    a.setMuted(true);
+    a.beep(440, 50);
+    a.setMuted(false);
+    a.beep(880, 50);
     expect(started).toEqual([880]);
+  });
+
+  it('keeps two instances independent', () => {
+    const a = createAudio();
+    const b = createAudio();
+    a.setMuted(true);
+    b.beep(220, 10);
+    expect(started).toEqual([220]);
   });
 
   it('does not throw when the browser has no AudioContext', () => {
     vi.stubGlobal('AudioContext', undefined);
-    expect(() => beep(440, 50)).not.toThrow();
+    expect(() => createAudio().beep(440, 50)).not.toThrow();
   });
 });
 ```
@@ -3211,23 +3643,28 @@ Expected: FAIL — unresolved imports for `hud.js`, `pause.js`, `audio.js`.
 // shell/hud — the score strip. Deliberately tiny: anything richer is the game's own business and
 // belongs on the canvas.
 //
-// The score is NOT in a live region. A screen reader would otherwise read every increment aloud, and
-// in a game that scores sixty times a minute that is not information, it is noise that drowns out the
-// announcements that matter. Games call srSay() at the moments worth interrupting for.
-import { $ } from '../ui/dom.js';
-
-export function setTitle(text: string): void {
-  const el = $('#game-title');
-  if (el) el.textContent = text;
-  document.title = `${text} · JS Minigames`;
+// The score is NOT in a live region. A screen reader would read every increment aloud, and in a game
+// that scores sixty times a minute that is not information, it is noise drowning out the announcements
+// that matter. Games call srSay() at the moments worth interrupting for.
+export interface Hud {
+  setTitle(text: string): void;
+  setScore(n: number): void;
+  reset(): void;
 }
 
-export function setScore(n: number): void {
-  const el = $('#hud-score');
-  if (el) el.textContent = String(n);
+export function createHud(root: ParentNode): Hud {
+  // Resolved once. Re-querying on every score change is work per frame for an element that never moves.
+  const titleEl = root.querySelector('#game-title');
+  const scoreEl = root.querySelector('#hud-score');
+  return {
+    setTitle(text) {
+      if (titleEl) titleEl.textContent = text;
+      document.title = `${text} · JS Minigames`;
+    },
+    setScore(n) { if (scoreEl) scoreEl.textContent = String(n); },
+    reset() { if (scoreEl) scoreEl.textContent = '0'; },
+  };
 }
-
-export function resetHud(): void { setScore(0); }
 ```
 
 - [ ] **Step 6: Write `engine/shell/pause.ts`**
@@ -3235,69 +3672,74 @@ export function resetHud(): void { setScore(0); }
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 // shell/pause — the modal pause menu, written once for every game.
-//
-// Three properties make it usable without a mouse, and all three are tested: focus enters the dialog
-// on open, Tab cycles inside it and cannot reach the page behind, and focus goes back where it came
-// from on close. A dialog missing the third one strands a keyboard user at the top of the document
-// every time they unpause.
-import { $, $$ } from '../ui/dom.js';
-
 export type PauseAction = 'resume' | 'restart' | 'quit';
 
-let open = false;
-let restoreFocus: HTMLElement | null = null;
-let handler: ((a: PauseAction) => void) | null = null;
-
-export function isPaused(): boolean { return open; }
-
-const items = (): HTMLElement[] => $$<HTMLElement>('#pause-menu [data-act]');
-
-function onKeyDown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') { e.preventDefault(); act('resume'); return; }
-  if (e.key !== 'Tab') return;
-  const list = items();
-  if (list.length === 0) return;
-  const i = list.indexOf(document.activeElement as HTMLElement);
-  e.preventDefault();
-  const next = e.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : (i === list.length - 1 ? 0 : i + 1);
-  list[next]!.focus();
+export interface Pause {
+  open(onAction: (a: PauseAction) => void): void;
+  close(): void;
+  isOpen(): boolean;
+  destroy(): void;
 }
 
-function onClick(e: Event): void {
-  const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
-  if (btn) act(btn.dataset['act'] as PauseAction);
-}
+export function createPause(panel: HTMLElement): Pause {
+  let open = false;
+  let restoreFocus: HTMLElement | null = null;
+  let handler: ((a: PauseAction) => void) | null = null;
 
-function act(a: PauseAction): void {
-  const fn = handler;
-  if (a === 'resume') closePause();
-  fn?.(a);
-}
+  const items = (): HTMLElement[] => [...panel.querySelectorAll<HTMLElement>('[data-act]')];
 
-export function openPause(onAction: (a: PauseAction) => void): void {
-  if (open) return;                       // a second open must not replace the first handler
-  const panel = $<HTMLElement>('#pause');
-  if (!panel) return;
-  handler = onAction;
-  restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  panel.hidden = false;
-  open = true;
+  function close(): void {
+    panel.hidden = true;
+    if (open) restoreFocus?.focus();
+    open = false;
+    handler = null;
+    restoreFocus = null;
+  }
+
+  function act(a: PauseAction): void {
+    const fn = handler;
+    if (a === 'resume') close();
+    fn?.(a);
+  }
+
+  function onKeyDown(e: KeyboardEvent): void {
+    if (!open) return;
+    if (e.key === 'Escape') { e.preventDefault(); act('resume'); return; }
+    if (e.key !== 'Tab') return;
+    const list = items();
+    if (list.length === 0) return;
+    e.preventDefault();
+    const i = list.indexOf(document.activeElement as HTMLElement);
+    const next = e.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : (i === list.length - 1 ? 0 : i + 1);
+    list[next]!.focus();
+  }
+
+  function onClick(e: Event): void {
+    if (!open) return;
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+    if (btn) act(btn.dataset['act'] as PauseAction);
+  }
+
   panel.addEventListener('keydown', onKeyDown);
   panel.addEventListener('click', onClick);
-  items()[0]?.focus();
-}
 
-export function closePause(): void {
-  const panel = $<HTMLElement>('#pause');
-  if (panel) {
-    panel.hidden = true;
-    panel.removeEventListener('keydown', onKeyDown);
-    panel.removeEventListener('click', onClick);
-  }
-  if (open) restoreFocus?.focus();
-  open = false;
-  handler = null;
-  restoreFocus = null;
+  return {
+    open(onAction) {
+      if (open) return;                     // a second open must not replace the first handler
+      handler = onAction;
+      restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      panel.hidden = false;
+      open = true;
+      items()[0]?.focus();
+    },
+    close,
+    isOpen: () => open,
+    destroy() {
+      panel.removeEventListener('keydown', onKeyDown);
+      panel.removeEventListener('click', onClick);
+      close();
+    },
+  };
 }
 ```
 
@@ -3305,69 +3747,682 @@ export function closePause(): void {
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// platform/audio — one square-wave beep. No asset files, matching the tracer's "art is data" rule.
+// platform/audio — one square-wave beep. No asset files, matching the "art is data" rule.
 //
-// A game gets exactly this. Anything richer would mean sound files, and 383 games with sound files is
-// a download problem and a licensing problem at the same time.
-let ctx: AudioContext | null = null;
-let muted = false;
+// A game gets exactly this. Anything richer means sound files, and 383 games with sound files is a
+// download problem and a licensing problem at the same time.
+export interface Audio {
+  beep(freq: number, ms: number): void;
+  setMuted(on: boolean): void;
+}
 
-export function muteAudio(on: boolean): void { muted = on; }
+export function createAudio(): Audio {
+  let ctx: AudioContext | null = null;
+  let muted = false;
 
-export function beep(freq: number, ms: number): void {
-  if (muted) return;
-  try {
-    const Ctor = globalThis.AudioContext;
-    if (!Ctor) return;                    // no Web Audio (older browser, or a node test) — stay silent
-    ctx ??= new Ctor();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'square';
-    osc.frequency.value = freq;
-    // Ramp down rather than cutting: an abrupt stop is an audible click on every single sound.
-    gain.gain.setValueAtTime(0.06, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + ms / 1000);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + ms / 1000);
-  } catch { /* audio is never worth breaking a game over */ }
+  return {
+    setMuted(on) { muted = on; },
+    beep(freq, ms) {
+      if (muted) return;
+      try {
+        const Ctor = globalThis.AudioContext;
+        if (!Ctor) return;                 // no Web Audio (older browser, node test) — stay silent
+        ctx ??= new Ctor();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        // Ramp down rather than cutting: an abrupt stop is an audible click on every single sound.
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + ms / 1000);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + ms / 1000);
+      } catch { /* audio is never worth breaking a game over */ }
+    },
+  };
 }
 ```
 
-- [ ] **Step 8: Run all three to verify they pass**
+- [ ] **Step 8: Run all three, typecheck and format**
 
 Run: `npx vitest run engine/shell/hud engine/shell/pause engine/platform/audio`
-Expected: PASS. `hud` 6, `pause` 10, `audio` 4.
+Expected: PASS. `hud` 7, `pause` 11, `audio` 5.
+
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add engine/shell/hud.ts engine/shell/hud.browser.test.ts engine/shell/pause.ts engine/shell/pause.browser.test.ts engine/platform/audio.ts engine/platform/audio.test.ts
-git commit -m "feat: add the HUD, the modal pause menu and a beep
+git commit -m "feat: add the HUD, the modal pause menu and a beep, as factories
 
 Focus enters the dialog, cycles inside it and returns where it came from, all
-three tested. The score stays out of the live region so a screen reader is not
-told about every point."
+three tested. None of the three keeps module-level state, so no test needs a
+cleanup hook to undo the previous one."
 ```
 
 ---
 
-### Task 12: Boot — the composition root
+### Task 12: The public game API, and the rule that keeps it public
 
 **Files:**
-- Create: `engine/shell/boot.ts`
-- Test: `engine/shell/boot.browser.test.ts`
+- Create: `engine/game-api.ts`, `.dependency-cruiser.cjs`
+- Modify: `package.json` (add `lint:deps`, extend `validate`)
+- Test: `engine/game-api.test.ts`, `games/conformance.test.ts`
 
 **Interfaces:**
-- Consumes: everything from Tasks 1–11.
-- Produces: `type GameContext`, `type GameMeta`, `type GameModule` (exactly as in the File Structure section), plus `startShell(): Promise<void>` and the debug handle `window.__demos = { pause, contrast, viz, game }`.
+- Consumes: types from Tasks 3, 4, 6, 8.
+- Produces: `GameContext`, `GameMeta`, `GameInstance`, `GameModule`, re-exported `Scene`, `Handle`, `SpriteSpec`, `SpriteRole`, `InputApi`, `Action`, `GameStrings`, `Translate`, `Box`, and the pure helpers `aabb`, `sweptAabb`. Plus `npm run lint:deps`.
 
-> This is the only file that knows how the pieces fit. Everything above it is a leaf or near-leaf, and
-> everything below it — the games — receives a finished `GameContext` and never imports the engine's
-> internals. That is what keeps a game at 30 lines of overhead.
+> **This is the module that makes the other 382 games cheap.** One import path, one contract. Two things
+> follow from having it, and neither works without the other.
+>
+> A game must not import `boot.ts` for its types. Depending on the composition root inverts the
+> dependency direction: the thing being composed would define nothing and the composer would define
+> everything, so any change to wiring would ripple into every game.
+>
+> And a written rule at this scale is a rule that decays. `dependency-cruiser` runs in `validate` and in
+> CI, so the first game that reaches past `game-api.ts` fails the build instead of setting a precedent.
 
 - [ ] **Step 1: Write the failing test**
+
+`engine/game-api.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import * as api from './game-api.js';
+
+describe('game-api', () => {
+  it('exports the pure helpers a game may legitimately need', () => {
+    expect(typeof api.aabb).toBe('function');
+    expect(typeof api.sweptAabb).toBe('function');
+  });
+
+  it('exports the eight action names, so a game can iterate them', () => {
+    expect([...api.ACTIONS].length).toBe(8);
+  });
+
+  it('exposes NO renderer object or class', () => {
+    for (const [name, value] of Object.entries(api)) {
+      expect(String(name), name).not.toMatch(/pixi/i);
+      expect(String(value), name).not.toMatch(/PIXI/);
+    }
+  });
+
+  it('carries only functions and plain data at runtime — the rest is types', () => {
+    for (const [name, value] of Object.entries(api)) {
+      expect(['function', 'object', 'string', 'number'], name).toContain(typeof value);
+    }
+  });
+});
+```
+
+`games/conformance.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Every game in the repository must satisfy the contract. This passes vacuously today and gains teeth
+// with each game added — which is the point: the check exists BEFORE the games it will police.
+import { describe, expect, it } from 'vitest';
+import type { GameModule } from '../engine/game-api.js';
+
+const modules = import.meta.glob<GameModule>('./*/*/main.ts', { eager: true });
+const entries = Object.entries(modules);
+
+describe('game conformance', () => {
+  it('every game exports meta, strings and create', () => {
+    for (const [path, mod] of entries) {
+      expect(mod.meta, path).toBeTruthy();
+      expect(mod.strings, path).toBeTruthy();
+      expect(typeof mod.create, path).toBe('function');
+    }
+  });
+
+  it("every game's slug and category match its folder", () => {
+    for (const [path, mod] of entries) {
+      const [, category, slug] = path.split('/');
+      expect(mod.meta.category, path).toBe(category);
+      expect(mod.meta.slug, path).toBe(slug);
+    }
+  });
+
+  it('every game declares all three locales', () => {
+    for (const [path, mod] of entries) {
+      for (const loc of ['pt', 'en', 'es'] as const) {
+        expect(mod.strings[loc], `${path} / ${loc}`).toBeTruthy();
+      }
+    }
+  });
+
+  it('no locale is missing a key that pt has', () => {
+    for (const [path, mod] of entries) {
+      const keys = Object.keys(mod.strings.pt);
+      for (const loc of ['en', 'es'] as const) {
+        for (const k of keys) {
+          expect(mod.strings[loc][k], `${path}: ${loc} is missing "${k}"`).toBeTruthy();
+        }
+      }
+    }
+  });
+
+  it('a non-pixel renderer always carries its justification', () => {
+    for (const [path, mod] of entries) {
+      if (mod.meta.renderer && mod.meta.renderer !== 'pixel') {
+        expect(mod.meta.rendererWhy, path).toBeTruthy();
+      }
+    }
+  });
+
+  it('declares a sane player count', () => {
+    for (const [path, mod] of entries) {
+      expect([1, 2, 3, 4], path).toContain(mod.meta.players);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npx vitest run --project node engine/game-api.test.ts games/conformance.test.ts`
+Expected: FAIL — `Failed to resolve import "./game-api.js"`.
+
+- [ ] **Step 3: Write `engine/game-api.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// game-api — THE ONLY MODULE A GAME MAY IMPORT.
+//
+// Everything a game is allowed to know lives behind this one path: the context it receives, the shapes
+// it declares, and the handful of pure helpers it would otherwise reimplement badly. Enforced by
+// `npm run lint:deps`, because a rule this important cannot depend on everyone remembering it.
+//
+// Note what is NOT here: no PixiJS, no DOM, no storage keys, no shell. A game that needs one of those
+// is a game whose need belongs in the context instead — which is a change to this file, reviewed once,
+// rather than 383 games each solving it their own way.
+export { aabb, sweptAabb, type Box, type SweptHit } from './core/collision.js';
+export { ACTIONS, type Action } from './input/actions.js';
+export type { InputApi } from './input/attach.js';
+export type { GameStrings, LocaleDict, Translate } from './core/i18n.js';
+export type { SpriteRole } from './render/high-contrast.js';
+export type { Handle, Scene, SpriteSpec } from './render/scene-pixi.js';
+
+import type { InputApi } from './input/attach.js';
+import type { Translate, GameStrings } from './core/i18n.js';
+import type { Scene } from './render/scene-pixi.js';
+
+/** Everything the shell hands a game. Adding a field here is a spec change: 383 games depend on it. */
+export interface GameContext {
+  scene: Scene;
+  /** The logical field. A game reads its dimensions here instead of importing engine constants. */
+  view: { w: number; h: number; tile: number };
+  input: InputApi;
+  audio: { beep(freq: number, ms: number): void };
+  rng: { rnd(): number; randInt(lo: number, hi: number): number; reseed(s: number): void };
+  storage: { get(k: string, f?: string | null): string | null; set(k: string, v: string | number | boolean): boolean };
+  /** Already namespaced to this game: call t('gameOver'), never t('snake.gameOver'). */
+  t: Translate;
+  srSay(text: string): void;
+  srAlert(text: string): void;
+  onGameOver(score: number): void;
+}
+
+export interface GameMeta {
+  slug: string;
+  title: string;
+  category: string;
+  density: 'leve' | 'medio' | 'denso';
+  players: 1 | 2 | 3 | 4;
+  renderer?: 'pixel' | 'svg' | '3d';
+  /** Required when renderer is not 'pixel'. The conformance test enforces it. */
+  rendererWhy?: string;
+}
+
+export interface GameInstance {
+  /** dt is in FRAMES, not seconds. 1.0 is one 60 fps frame. */
+  update(dt: number): void;
+  teardown(): void;
+}
+
+/** What every games/<cat>/<slug>/main.ts exports. */
+export interface GameModule {
+  meta: GameMeta;
+  strings: GameStrings;
+  create(ctx: GameContext): GameInstance;
+}
+```
+
+- [ ] **Step 4: Write `.dependency-cruiser.cjs`**
+
+```js
+// SPDX-License-Identifier: GPL-3.0-or-later
+/** @type {import('dependency-cruiser').IConfiguration} */
+module.exports = {
+  forbidden: [
+    {
+      name: 'games-only-via-game-api',
+      severity: 'error',
+      comment:
+        'A game may import engine/game-api.ts and files inside its own folder, and nothing else. ' +
+        'If a game needs something the API does not offer, add it to the context in game-api.ts — ' +
+        'reviewed once — rather than reaching past the boundary here.',
+      from: { path: '^games/' },
+      to: { path: '^engine/', pathNot: '^engine/game-api\\.ts$' },
+    },
+    {
+      name: 'engine-never-imports-a-game',
+      severity: 'error',
+      comment:
+        'The engine must not depend on any game. Games are discovered at runtime through ' +
+        'import.meta.glob in the router; a static import here would bundle every game into the shell.',
+      from: { path: '^engine/' },
+      to: { path: '^games/' },
+    },
+    {
+      name: 'no-circular',
+      severity: 'error',
+      comment: 'A cycle means the two modules are one module wearing two names.',
+      from: {},
+      to: { circular: true },
+    },
+    {
+      name: 'no-orphans',
+      severity: 'warn',
+      comment: 'A module nothing imports is either dead or miswired.',
+      from: { orphan: true, pathNot: '\\.(test|config)\\.(ts|mts|cjs)$|^engine/shell/boot\\.ts$' },
+      to: {},
+    },
+  ],
+  options: {
+    doNotFollow: { path: 'node_modules' },
+    exclude: { path: '\\.test\\.(ts|mts)$' },
+    tsConfig: { fileName: 'tsconfig.json' },
+    enhancedResolveOptions: { extensions: ['.ts', '.mts', '.js'] },
+  },
+};
+```
+
+> The `games-only-via-game-api` rule is the one that matters. `no-circular` and `no-orphans` are cheap
+> to add while the config is open and would each cost an afternoon to retrofit.
+>
+> `boot.ts` is exempt from the orphan rule because nothing imports it — `play.html` does, and
+> dependency-cruiser does not read HTML.
+
+- [ ] **Step 5: Wire the check into the scripts**
+
+In `package.json`:
+```json
+"lint:deps": "depcruise engine games scripts --config .dependency-cruiser.cjs",
+"validate": "npm run format:check && npm run typecheck && npm run lint:deps && vitest run && npm run build"
+```
+
+- [ ] **Step 6: Run the tests and the dependency check**
+
+Run: `npx vitest run --project node engine/game-api.test.ts games/conformance.test.ts`
+Expected: PASS. `game-api` 4; `conformance` 6, all vacuous — there are no games yet.
+
+Run: `npm run lint:deps`
+Expected: `no dependency violations found`.
+
+- [ ] **Step 7: Prove the rule actually bites**
+
+This step exists because an unverified guard is not a guard. Temporarily create
+`games/tmp/probe/main.ts`:
+```ts
+import { LOGICAL_W } from '../../../engine/core/constants.js';
+export const probe = LOGICAL_W;
+```
+
+Run: `npm run lint:deps`
+Expected: FAIL, naming `games-only-via-game-api`.
+
+Then delete `games/tmp/` and run it again — expected: clean. Do not commit the probe.
+
+- [ ] **Step 8: Typecheck, format and commit**
+
+Run: `npx tsc --noEmit && npm run format:check`
+Expected: no output from either.
+
+```bash
+git add engine/game-api.ts engine/game-api.test.ts games/conformance.test.ts .dependency-cruiser.cjs package.json
+git commit -m "feat: add the public game API and enforce it
+
+One import path for all 383 games, and a dependency-cruiser rule that fails the
+build when a game reaches past it. A written boundary at this scale decays; a
+checked one does not.
+
+Games no longer take their types from the composition root, which had the
+dependency arrow pointing the wrong way."
+```
+
+---
+
+### Task 13: The session and the composition root
+
+**Files:**
+- Create: `engine/shell/session.ts`, `engine/shell/boot.ts`
+- Test: `engine/shell/session.browser.test.ts`, `engine/shell/boot.browser.test.ts`
+
+**Interfaces:**
+- Consumes: everything from Tasks 1–12.
+- Produces:
+  - `startSession(deps: SessionDeps): Session` with `restart()`, `destroy()`, `hasCrashed()`.
+  - `startShell(): Promise<void>`, plus the debug handle `window.__demos`.
+
+> Split in two on purpose. `boot` **composes**: it creates every instance, in one place, and hands them
+> down. `session` **runs**: one game's lifetime, from mounting the canvas to tearing it down. The first
+> draft did both in one file and was already accumulating pause wiring, language redraw, high-score
+> persistence and renderer validation — the shape a god-module has before anyone calls it that.
+>
+> The session owns the **error boundary**. Across 383 games written over months, some game will throw in
+> `update`. Without a boundary it throws again every frame: the player sees a frozen canvas, the console
+> fills, and a broken game is indistinguishable from a broken engine. The boundary stops the loop once,
+> says so out loud through the assertive live region, and leaves the pause menu reachable so the player
+> can get back to the catalog.
+
+- [ ] **Step 1: Write the failing session test**
+
+`engine/shell/session.browser.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { startSession } from './session.js';
+import { createI18n } from '../core/i18n.js';
+import { createVisualState } from '../render/high-contrast.js';
+import { createHud } from './hud.js';
+import { createAnnouncer } from '../core/a11y-sr.js';
+import { createAudio } from '../platform/audio.js';
+import { KB_DEFAULTS } from '../input/keyboard.js';
+import type { GameContext, GameModule } from '../game-api.js';
+
+function stubStorage(): void {
+  const m = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => { m.set(k, v); },
+    removeItem: (k: string) => { m.delete(k); },
+  });
+}
+
+/** A module the test controls completely: no game folder, no glob, no surprises. */
+function fakeModule(over: Partial<GameModule> = {}, body?: (ctx: GameContext) => void): GameModule {
+  return {
+    meta: { slug: 'probe', title: 'Probe', category: 'test', density: 'leve', players: 1 },
+    strings: { pt: { hi: 'olá' }, en: { hi: 'hi' }, es: { hi: 'hola' } },
+    create: (ctx) => {
+      body?.(ctx);
+      return { update() {}, teardown() {} };
+    },
+    ...over,
+  };
+}
+
+function deps(mod: GameModule, onCrash = vi.fn()) {
+  const region = document.querySelector<HTMLElement>('#game-region')!;
+  const i18n = createI18n();
+  i18n.register(mod.meta.slug, mod.strings);
+  return {
+    region, mod, i18n,
+    visual: createVisualState(),
+    hud: createHud(document),
+    announcer: createAnnouncer(document),
+    audio: createAudio(),
+    kb: KB_DEFAULTS,
+    isPaused: () => false,
+    onCrash,
+  };
+}
+
+beforeEach(() => {
+  stubStorage();
+  document.body.innerHTML =
+    '<h1 id="game-title"></h1><strong id="hud-score" aria-live="off">0</strong>' +
+    '<div id="sr-status"></div><div id="sr-alert"></div>' +
+    '<div id="game-region" tabindex="0"></div>';
+});
+
+describe('startSession', () => {
+  it('puts a 320x180 canvas in the region', () => {
+    const s = startSession(deps(fakeModule()));
+    const cv = document.querySelector<HTMLCanvasElement>('#game-region canvas')!;
+    expect([cv.width, cv.height]).toEqual([320, 180]);
+    s.destroy();
+  });
+
+  it('shows the title from meta', () => {
+    const s = startSession(deps(fakeModule()));
+    expect(document.querySelector('#game-title')!.textContent).toBe('Probe');
+    s.destroy();
+  });
+
+  it('hands the game a context with no renderer object in it', () => {
+    let seen: GameContext | null = null;
+    const s = startSession(deps(fakeModule({}, (ctx) => { seen = ctx; })));
+    expect(seen).not.toBeNull();
+    expect(Object.keys(seen!)).not.toContain('stage');
+    expect((seen as unknown as Record<string, unknown>)['app']).toBeUndefined();
+    s.destroy();
+  });
+
+  it('hands the game the logical field size, so it imports no constants', () => {
+    let seen: GameContext | null = null;
+    const s = startSession(deps(fakeModule({}, (ctx) => { seen = ctx; })));
+    expect(seen!.view).toEqual({ w: 320, h: 180, tile: 16 });
+    s.destroy();
+  });
+
+  it('namespaces the translate function to this game', () => {
+    let seen: GameContext | null = null;
+    const s = startSession(deps(fakeModule({}, (ctx) => { seen = ctx; })));
+    expect(seen!.t('hi')).toBe('olá');
+    s.destroy();
+  });
+
+  it('rejects a non-pixel renderer with no justification', () => {
+    const bad = fakeModule({ meta: { slug: 'p', title: 'P', category: 'test', density: 'leve', players: 1, renderer: 'svg' } });
+    expect(() => startSession(deps(bad))).toThrow(/rendererWhy/);
+  });
+
+  it('records a high score and announces the end', async () => {
+    let seen: GameContext | null = null;
+    const s = startSession(deps(fakeModule({}, (ctx) => { seen = ctx; })));
+    seen!.onGameOver(30);
+    expect(localStorage.getItem('demos.hi.probe')).toBe('30');
+    expect(document.querySelector('#hud-score')!.textContent).toBe('30');
+    s.destroy();
+  });
+
+  it('keeps the better of two scores', () => {
+    let seen: GameContext | null = null;
+    const s = startSession(deps(fakeModule({}, (ctx) => { seen = ctx; })));
+    seen!.onGameOver(30);
+    seen!.onGameOver(10);
+    expect(localStorage.getItem('demos.hi.probe')).toBe('30');
+    s.destroy();
+  });
+
+  it('STOPS THE LOOP when a game throws, instead of throwing every frame', async () => {
+    const onCrash = vi.fn();
+    let ticks = 0;
+    const crashing = fakeModule({
+      create: () => ({ update() { ticks++; throw new Error('boom'); }, teardown() {} }),
+    });
+    const s = startSession(deps(crashing, onCrash));
+    await new Promise((r) => setTimeout(r, 80));   // several frames
+    expect(ticks).toBe(1);
+    expect(s.hasCrashed()).toBe(true);
+    expect(onCrash).toHaveBeenCalledOnce();
+    s.destroy();
+  });
+
+  it('says out loud that the game failed, rather than freezing silently', async () => {
+    const crashing = fakeModule({ create: () => ({ update() { throw new Error('boom'); }, teardown() {} }) });
+    const s = startSession(deps(crashing));
+    await new Promise((r) => setTimeout(r, 80));
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    expect(document.querySelector('#sr-alert')!.textContent).not.toBe('');
+    s.destroy();
+  });
+
+  it('restart builds a fresh instance and resets the score', () => {
+    let creates = 0;
+    const counting = fakeModule({ create: () => { creates++; return { update() {}, teardown() {} }; } });
+    const s = startSession(deps(counting));
+    expect(creates).toBe(1);
+    s.restart();
+    expect(creates).toBe(2);
+    expect(document.querySelector('#hud-score')!.textContent).toBe('0');
+    s.destroy();
+  });
+
+  it('tears the game down and removes the canvas on destroy', () => {
+    const teardown = vi.fn();
+    const s = startSession(deps(fakeModule({ create: () => ({ update() {}, teardown }) })));
+    s.destroy();
+    expect(teardown).toHaveBeenCalledOnce();
+    expect(document.querySelector('#game-region canvas')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project browser engine/shell/session.browser.test.ts`
+Expected: FAIL — `Failed to resolve import "./session.js"`.
+
+- [ ] **Step 3: Write `engine/shell/session.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// shell/session — one game's lifetime: mount, build the context, run the loop, tear down.
+//
+// It receives every collaborator as an argument and constructs none of them, which is what lets the
+// test above drive it with a fake game module and no game folder at all.
+import { LOGICAL_H, LOGICAL_W, TILE } from '../core/constants.js';
+import { startLoop } from '../core/loop.js';
+import { createRng } from '../core/rng.js';
+import * as store from '../platform/storage.js';
+import { attachInput } from '../input/attach.js';
+import type { KBDefaults } from '../input/keyboard.js';
+import { mountPixi } from '../render/mount.js';
+import { createPixiScene } from '../render/scene-pixi.js';
+import type { VisualState } from '../render/high-contrast.js';
+import type { I18n } from '../core/i18n.js';
+import type { Announcer } from '../core/a11y-sr.js';
+import type { Audio } from '../platform/audio.js';
+import type { Hud } from './hud.js';
+import type { GameContext, GameInstance, GameMeta, GameModule } from '../game-api.js';
+
+export interface SessionDeps {
+  region: HTMLElement;
+  mod: GameModule;
+  i18n: I18n;
+  visual: VisualState;
+  hud: Hud;
+  announcer: Announcer;
+  audio: Audio;
+  kb: KBDefaults;
+  isPaused(): boolean;
+  onCrash(err: unknown): void;
+}
+
+export interface Session {
+  restart(): void;
+  destroy(): void;
+  hasCrashed(): boolean;
+}
+
+/**
+ * A game declaring a non-pixel renderer must say why (spec D6). The conformance test catches this at
+ * build time; this catches a module that was loaded some other way. Throwing beats warning: a silent
+ * deviation is exactly what the decision was written to stop.
+ */
+function assertRenderer(meta: GameMeta): void {
+  if (meta.renderer && meta.renderer !== 'pixel' && !meta.rendererWhy) {
+    throw new Error(`Game "${meta.slug}" declares renderer "${meta.renderer}" without rendererWhy (spec D6).`);
+  }
+}
+
+export function startSession(deps: SessionDeps): Session {
+  const { region, mod, i18n, visual, hud, announcer, audio, kb } = deps;
+  assertRenderer(mod.meta);
+
+  const mount = mountPixi(region);
+  const scene = createPixiScene(mount.stage, visual);
+  const input = attachInput(region, mod.meta.players, kb);
+  const rng = createRng();
+  const hiKey = store.KEYS.highScore(mod.meta.slug);
+
+  const ctx: GameContext = {
+    scene,
+    view: { w: LOGICAL_W, h: LOGICAL_H, tile: TILE },
+    input,
+    audio: { beep: (f, ms) => audio.beep(f, ms) },
+    rng: { rnd: rng.rnd, randInt: rng.randInt, reseed: rng.reseed },
+    storage: { get: (k, f = null) => store.get(k, f), set: (k, v) => store.set(k, v) },
+    t: i18n.scoped(mod.meta.slug),
+    srSay: (text) => announcer.say(text),
+    srAlert: (text) => announcer.alert(text),
+    onGameOver(score) {
+      hud.setScore(score);
+      if (score > Number(store.get(hiKey, '0'))) store.set(hiKey, score);
+      announcer.alert(i18n.t('shell.gameOver', { score }));
+    },
+  };
+
+  hud.setTitle(mod.meta.title);
+  hud.reset();
+
+  let instance: GameInstance = mod.create(ctx);
+  let crashed = false;
+
+  /**
+   * The error boundary. One throw stops the loop for good: a game that failed once will fail again on
+   * the next frame with the same state, so retrying only fills the console while the player stares at
+   * a frozen picture. The failure is announced assertively and logged with the game's slug, so a bug
+   * report can name which of the 383 broke.
+   */
+  startLoop(mount.app.ticker, (dt) => {
+    if (crashed || deps.isPaused()) return;
+    try {
+      input.poll();
+      instance.update(dt);
+    } catch (err) {
+      crashed = true;
+      console.error(`[${mod.meta.category}/${mod.meta.slug}] crashed:`, err);
+      announcer.alert(i18n.t('shell.crashed'));
+      deps.onCrash(err);
+    }
+  });
+
+  return {
+    hasCrashed: () => crashed,
+
+    restart() {
+      instance.teardown();
+      scene.clear();
+      hud.reset();
+      crashed = false;
+      instance = mod.create(ctx);
+    },
+
+    destroy() {
+      instance.teardown();
+      scene.destroy();
+      input.detach();
+      mount.destroy();
+    },
+  };
+}
+```
+
+- [ ] **Step 4: Run the session test to verify it passes**
+
+Run: `npx vitest run --project browser engine/shell/session.browser.test.ts`
+Expected: PASS, 12 tests — including the two that prove a throwing game stops once and says so.
+
+- [ ] **Step 5: Write the failing boot test**
 
 `engine/shell/boot.browser.test.ts`:
 ```ts
@@ -3375,7 +4430,6 @@ told about every point."
 import { afterEach, describe, expect, it } from 'vitest';
 import { startShell } from './boot.js';
 
-/** Loads the real play.html into the test document, then boots against it. */
 async function mountShell(hash: string): Promise<void> {
   const html = await (await fetch('/play.html')).text();
   const parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -3393,17 +4447,15 @@ describe('startShell', () => {
     expect(document.querySelector('#game-title')!.textContent).toContain('no-such-game');
   });
 
-  it('boots a real game and puts a canvas in the game region', async () => {
-    await mountShell('#arcade-classico/snake');
-    const cv = document.querySelector('#game-region canvas');
-    expect(cv).not.toBeNull();
-    expect((cv as HTMLCanvasElement).width).toBe(320);
-    expect((cv as HTMLCanvasElement).height).toBe(180);
+  it('survives a malformed hash without throwing', async () => {
+    await expect(mountShell('#../../etc/passwd')).resolves.toBeUndefined();
   });
 
-  it('shows the game title from its meta', async () => {
+  it('boots a real game and puts a canvas in the game region', async () => {
     await mountShell('#arcade-classico/snake');
-    expect(document.querySelector('#game-title')!.textContent).toBeTruthy();
+    const cv = document.querySelector<HTMLCanvasElement>('#game-region canvas');
+    expect(cv).not.toBeNull();
+    expect([cv!.width, cv!.height]).toEqual([320, 180]);
   });
 
   it('installs the six colour-vision filters', async () => {
@@ -3418,237 +4470,175 @@ describe('startShell', () => {
 
   it('exposes a debug handle for the preview harness', async () => {
     await mountShell('#arcade-classico/snake');
-    expect((window as unknown as { __demos?: unknown }).__demos).toBeTruthy();
+    const h = (window as unknown as { __demos?: { game: { slug: string } } }).__demos;
+    expect(h?.game.slug).toBe('snake');
   });
 
-  it('registers the game strings under its slug', async () => {
+  it('registered the game strings, so its own keys resolve', async () => {
     await mountShell('#arcade-classico/snake');
-    const handle = (window as unknown as { __demos: { t(k: string): string } }).__demos;
-    expect(handle.t('gameOver')).not.toBe('gameOver');
+    const h = (window as unknown as { __demos: { t(k: string): string } }).__demos;
+    expect(h.t('gameOver')).not.toBe('gameOver');
   });
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 6: Run it — five pass, two wait for Snake**
 
 Run: `npx vitest run --project browser engine/shell/boot.browser.test.ts`
-Expected: FAIL — `Failed to resolve import "./boot.js"`.
+Expected after Step 7: the two "real game" cases still fail with "Game not found" until Task 14 lands.
+Everything else passes.
 
-> The two "boots a real game" cases also need Task 13's Snake to exist. Expect them to keep failing
-> with "Game not found" until Task 13 lands; the other five must pass at the end of this task.
-
-- [ ] **Step 3: Write `engine/shell/boot.ts`**
+- [ ] **Step 7: Write `engine/shell/boot.ts`**
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// shell/boot — the composition root. The only module that knows how the engine fits together.
+// shell/boot — the composition root. The ONLY module that knows how the engine fits together, and the
+// only one that creates instances of anything.
 //
-// A game receives a finished GameContext and imports nothing from the engine. That is the whole
-// economy of this project: 383 games each pay for their own rules and nothing else.
-import type { Container, Sprite } from 'pixi.js';
-import { MAX_DT } from '../core/constants.js';
-import { startLoop } from '../core/loop.js';
-import { srAlert, srSay } from '../core/a11y-sr.js';
-import { applyDom, initI18n, registerDict, scopedT, t, type GameStrings, type Translate } from '../core/i18n.js';
-import { randInt, reseed, rnd } from '../core/rng.js';
-import * as store from '../platform/storage.js';
-import { beep } from '../platform/audio.js';
-import { attachInput, type InputApi } from '../input/attach.js';
-import { initKB } from '../input/keyboard.js';
+// Every collaborator below is built here and passed down. Nothing reaches for a module-level singleton,
+// which is why every one of them can be tested on its own and why two of anything can coexist.
+import { createAnnouncer } from '../core/a11y-sr.js';
+import { createI18n } from '../core/i18n.js';
+import { loadKB } from '../input/keyboard.js';
 import { installCvdFilters } from '../render/cvd-matrices.js';
-import { initViz } from '../render/viz.js';
-import { getContrastLevel, setContrastLevel, type ContrastLevel } from '../render/high-contrast.js';
-import { makeSpriteApi, type SpriteSpec } from '../render/sprites.js';
-import { mountPixi } from '../render/mount.js';
+import { createVisualState, type ContrastLevel } from '../render/high-contrast.js';
+import { createViz } from '../render/viz.js';
+import { createAudio } from '../platform/audio.js';
+import * as store from '../platform/storage.js';
 import { $ } from '../ui/dom.js';
-import { resetHud, setScore, setTitle } from './hud.js';
-import { closePause, isPaused, openPause } from './pause.js';
+import { createHud } from './hud.js';
+import { createPause } from './pause.js';
 import { loaderFor, parseHash } from './router.js';
-
-export interface GameMeta {
-  slug: string; title: string; category: string;
-  density: 'leve' | 'medio' | 'denso';
-  players: 1 | 2 | 3 | 4;
-  renderer?: 'pixel' | 'svg' | '3d';
-  rendererWhy?: string;
-}
-
-export interface GameContext {
-  stage: Container;
-  input: InputApi;
-  sprites: { make(spec: SpriteSpec): Sprite };
-  audio: { beep(freq: number, ms: number): void };
-  rng: { rnd(): number; randInt(lo: number, hi: number): number; reseed(s: number): void };
-  storage: { get(k: string, f?: string | null): string | null; set(k: string, v: string | number | boolean): boolean };
-  t: Translate;
-  srSay(text: string): void;
-  srAlert(text: string): void;
-  onGameOver(score: number): void;
-}
-
-export interface GameModule {
-  meta: GameMeta;
-  strings: GameStrings;
-  setup(ctx: GameContext): void;
-  update(dt: number): void;
-  teardown(): void;
-}
-
-/**
- * A game declaring a non-pixel renderer must say why (D6). The build cannot check a runtime value, so
- * the check lives here and is loud: a silent deviation is exactly what the decision was meant to stop.
- */
-function assertRenderer(meta: GameMeta): void {
-  if (meta.renderer && meta.renderer !== 'pixel' && !meta.rendererWhy) {
-    throw new Error(`Game "${meta.slug}" declares renderer "${meta.renderer}" without rendererWhy (see spec D6).`);
-  }
-}
+import { startSession, type Session } from './session.js';
+import { mountSettings } from './settings.js';
+import type { GameModule } from '../game-api.js';
 
 export async function startShell(): Promise<void> {
-  initKB();
-  initI18n();
-  applyDom(document);
-
   const region = $<HTMLElement>('#game-region');
   if (!region) return;
 
+  const i18n = createI18n();
+  await i18n.init();
+  i18n.applyDom(document);
+
+  const announcer = createAnnouncer(document);
+  const hud = createHud(document);
+  const audio = createAudio();
+  const visual = createVisualState(Number(store.get(store.KEYS.contrast, '0')) as ContrastLevel);
+
   installCvdFilters($('#cvd-filters'));
-  initViz($('#cvd-filters'), region);
-  setContrastLevel(Number(store.get(store.KEYS.contrast, '0')) as ContrastLevel);
+  const viz = createViz(region);
+  viz.restore();
 
   const route = parseHash(location.hash);
   const load = route ? loaderFor(route.category, route.slug) : null;
   if (!route || !load) {
-    const label = t('shell.notFound', { slug: route ? `${route.category}/${route.slug}` : '—' });
-    setTitle(label);
-    srAlert(label);
+    const label = i18n.t('shell.notFound', { slug: route ? `${route.category}/${route.slug}` : '—' });
+    hud.setTitle(label);
+    announcer.alert(label);
     return;
   }
 
   const mod = (await load()) as GameModule;
-  assertRenderer(mod.meta);
-  registerDict(mod.meta.slug, mod.strings);
+  i18n.register(mod.meta.slug, mod.strings);
 
-  const mount = mountPixi(region);
-  const input = attachInput(region, mod.meta.players);
-  const sprites = makeSpriteApi(mount.stage);
-  const gameT = scopedT(mod.meta.slug);
+  const pausePanel = $<HTMLElement>('#pause');
+  const pause = pausePanel ? createPause(pausePanel) : null;
 
-  setTitle(mod.meta.title);
-  resetHud();
+  let session: Session | null = null;
+  session = startSession({
+    region, mod, i18n, visual, hud, announcer, audio,
+    kb: loadKB(),
+    isPaused: () => pause?.isOpen() ?? false,
+    // A crashed game must still be escapable, so the pause menu is opened FOR the player rather than
+    // leaving them on a dead canvas with no visible way out.
+    onCrash: () => pause?.open((a) => { if (a === 'quit') location.href = './index.html'; }),
+  });
 
-  const hiKey = store.KEYS.highScore(mod.meta.slug);
-  const ctx: GameContext = {
-    stage: mount.stage,
-    input,
-    sprites,
-    audio: { beep },
-    rng: { rnd, randInt, reseed },
-    storage: { get: (k, f = null) => store.get(k, f), set: (k, v) => store.set(k, v) },
-    t: gameT,
-    srSay,
-    srAlert,
-    onGameOver(score) {
-      setScore(score);
-      const best = Number(store.get(hiKey, '0'));
-      if (score > best) store.set(hiKey, score);
-      srAlert(t('shell.gameOver', { score }));
-    },
-  };
-
-  mod.setup(ctx);
-
-  function teardown(): void {
-    mod.teardown();
-    sprites.clear();
-    input.detach();
-    mount.destroy();
-  }
-
-  startLoop(mount.app.ticker, (dt) => {
-    if (isPaused()) return;
-    input.poll();
-    mod.update(dt);
-  }, MAX_DT);
-
-  // Pause is the shell's, not the game's: one implementation, one focus contract, 383 games.
+  // Pause belongs to the shell, not to any game: one implementation, one focus contract, 383 games.
   region.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || isPaused()) return;
+    if (e.key !== 'Escape' || pause === null || pause.isOpen()) return;
     e.preventDefault();
-    openPause((action) => {
-      if (action === 'restart') { mod.teardown(); resetHud(); mod.setup(ctx); }
-      if (action === 'quit') { teardown(); location.href = './index.html'; }
+    pause.open((action) => {
+      if (action === 'restart') session?.restart();
+      if (action === 'quit') { session?.destroy(); location.href = './index.html'; }
     });
   });
 
-  // Reloading on hash change is cruder than swapping games in place, and correct: a game that ends by
-  // being torn down cannot leave a stray ticker, listener or texture behind to haunt the next one.
-  window.addEventListener('hashchange', () => location.reload());
+  mountSettings({ root: document, region, i18n, visual, viz });
 
-  // Canvas text is invisible to applyDom, which only walks [data-i18n] in the DOM. Subscribing HERE
-  // means the discipline is enforced once instead of being remembered in 383 games: a language switch
-  // re-runs the game's setup, so anything it drew with t() is redrawn in the new language.
-  window.addEventListener('i18n:change', () => {
-    applyDom(document);
-    mod.teardown();
-    resetHud();
-    mod.setup(ctx);
+  // Canvas text is invisible to applyDom, which only walks [data-i18n] in the DOM. Restarting the game
+  // is the blunt way to redraw it, and it means the discipline lives here instead of in 383 games.
+  i18n.onChange(() => {
+    i18n.applyDom(document);
+    mountSettings({ root: document, region, i18n, visual, viz });
+    session?.restart();
   });
 
+  // Reloading on hash change is cruder than swapping games in place, and correct: a torn-down game
+  // cannot leave a stray ticker, listener or texture behind to haunt the next one.
+  window.addEventListener('hashchange', () => location.reload());
+
   region.focus();
-  srSay(mod.meta.title);
+  announcer.say(mod.meta.title);
 
   (window as unknown as Record<string, unknown>)['__demos'] = {
-    game: mod.meta, t: gameT,
-    pause: { open: openPause, close: closePause, isPaused },
-    contrast: { get: getContrastLevel, set: setContrastLevel },
+    game: mod.meta,
+    t: i18n.scoped(mod.meta.slug),
+    i18n,
+    visual,
+    viz,
+    pause,
+    session,
   };
 }
 
 // Auto-boot only when the shell markup is already present. play.html loads this module at the end of
 // the body, so it is; a test importing startShell has an empty document, so it is not. Guarding on the
-// markup rather than on an environment flag means there is no test-only branch to get out of sync.
+// markup rather than on an environment flag leaves no test-only branch to drift.
 if (typeof document !== 'undefined' && document.querySelector('#game-region')) void startShell();
 ```
 
-- [ ] **Step 4: Run the test**
+- [ ] **Step 8: Typecheck, run everything and commit**
 
-Run: `npx vitest run --project browser engine/shell/boot.browser.test.ts`
-Expected: 5 PASS, 2 FAIL with "Game not found" — Snake does not exist yet. Task 13 turns those green.
-
-- [ ] **Step 5: Run typecheck**
-
-Run: `npx tsc --noEmit`
-Expected: no output, exit 0.
-
-- [ ] **Step 6: Commit**
+Run: `npx tsc --noEmit && npm run lint:deps && npm run format:check`
+Expected: no output from any of the three.
 
 ```bash
-git add engine/shell/boot.ts engine/shell/boot.browser.test.ts
-git commit -m "feat: add the composition root
+git add engine/shell/session.ts engine/shell/session.browser.test.ts engine/shell/boot.ts engine/shell/boot.browser.test.ts
+git commit -m "feat: split the composition root from the game session
 
-Boot is the only module that knows how the engine fits together; a game gets a
-finished GameContext and imports none of it. Pause, restart and quit belong to
-the shell, so all 383 games share one focus contract. A non-pixel renderer
-without a justification throws rather than passing quietly."
+boot composes and creates every instance; session runs one game's lifetime.
+The first draft did both and was already collecting pause wiring, language
+redraw, score persistence and renderer validation.
+
+The session owns an error boundary. A throwing game stops the loop once,
+announces the failure and opens the pause menu, instead of throwing every
+frame behind a frozen canvas that looks exactly like a broken engine."
 ```
 
 ---
 
-### Task 13: Snake — the first reference game
+### Task 14: Snake — the first reference game
 
 **Files:**
-- Create: `games/arcade-classico/snake/rules.ts`, `games/arcade-classico/snake/strings.ts`, `games/arcade-classico/snake/main.ts`
+- Create: `games/arcade-classico/snake/rules.ts`, `strings.ts`, `main.ts`
 - Test: `games/arcade-classico/snake/rules.test.ts`
 
 **Interfaces:**
-- Consumes: `GameContext`, `GameMeta`, `GameModule` from Task 12.
-- Produces: the shape every later game copies — pure `rules.ts` tested in the node project, `strings.ts` with three locales, and a thin `main.ts` that only renders and reads input.
+- Consumes: `GameContext`, `GameMeta`, `GameInstance`, `GameStrings` from `engine/game-api.ts` — and nothing else from the engine.
+- Produces: the shape every later game copies.
 
-> **This task defines the pattern for the other 382 games**, so the split matters more than the game.
-> Everything decidable without a screen lives in `rules.ts` and is tested at speed in node; `main.ts`
-> owns only sprites, input and announcements. A game that mixes the two cannot be tested without a
-> browser, and 383 browser-only test suites is not a suite anyone will run.
+> **This task defines the pattern for the other 382 games.** Three properties, and the plan is wrong if
+> any of them slips:
+>
+> Everything decidable without a screen lives in `rules.ts`, tested at speed in the node project.
+> `main.ts` only draws and reads input — 383 browser-only suites is not a suite anyone runs.
+>
+> `create(ctx)` returns the instance and **closes over its own state**. No `let` at module scope, so
+> restart cannot inherit anything from the run before it.
+>
+> The only engine import is `game-api`. `npm run lint:deps` fails the build otherwise.
 
 - [ ] **Step 1: Write the failing rules test**
 
@@ -3658,17 +4648,18 @@ without a justification throws rather than passing quietly."
 import { describe, expect, it } from 'vitest';
 import { createSnake, step, turn, type SnakeState } from './rules.js';
 
-/** Deterministic stand-in for ctx.rng.randInt, cycling through scripted values. */
+/** Deterministic stand-in for ctx.rng, cycling through scripted values. */
 function scripted(values: number[]): () => number {
   let i = 0;
   return () => values[i++ % values.length]!;
 }
 
-/** A snake laid out horizontally, head at (hx, hy), moving right, with the apple parked far away. */
+/** A snake laid out horizontally, head at (hx, hy), moving right, apple parked far away. */
 function fixture(hx: number, hy: number, len = 3): SnakeState {
   const s = createSnake(10, 10, scripted([9, 9]));
   s.body = Array.from({ length: len }, (_, i) => ({ x: hx - i, y: hy }));
   s.dir = { x: 1, y: 0 };
+  s.next = { x: 1, y: 0 };
   s.apple = { x: 9, y: 9 };
   return s;
 }
@@ -3683,7 +4674,6 @@ describe('createSnake', () => {
   });
 
   it('never places the first apple on the snake', () => {
-    // The scripted rand offers the head cell first; the placement must reject it and take the next.
     const s = createSnake(10, 10, scripted([0, 0, 5, 5]));
     expect(s.body.some((c) => c.x === s.apple.x && c.y === s.apple.y)).toBe(false);
   });
@@ -3708,7 +4698,7 @@ describe('turn', () => {
   it('refuses a reversal even through two turns in the same frame', () => {
     const s = fixture(5, 5);
     turn(s, { x: 0, y: -1 });
-    turn(s, { x: 0, y: 1 });   // would reverse the queued direction
+    turn(s, { x: 0, y: 1 });
     step(s, scripted([9, 9]));
     expect(s.body[0]).toEqual({ x: 5, y: 4 });
   });
@@ -3737,19 +4727,19 @@ describe('step', () => {
 
   it('dies on the left wall', () => {
     const s = fixture(0, 5);
-    s.dir = { x: -1, y: 0 };
+    s.dir = { x: -1, y: 0 }; s.next = { x: -1, y: 0 };
     step(s, scripted([0, 0]));
     expect(s.alive).toBe(false);
   });
 
   it('dies on the top and bottom walls', () => {
     const top = fixture(5, 0);
-    top.dir = { x: 0, y: -1 };
+    top.dir = { x: 0, y: -1 }; top.next = { x: 0, y: -1 };
     step(top, scripted([0, 0]));
     expect(top.alive).toBe(false);
 
     const bottom = fixture(5, 9);
-    bottom.dir = { x: 0, y: 1 };
+    bottom.dir = { x: 0, y: 1 }; bottom.next = { x: 0, y: 1 };
     step(bottom, scripted([0, 0]));
     expect(bottom.alive).toBe(false);
   });
@@ -3757,7 +4747,7 @@ describe('step', () => {
   it('dies on its own body', () => {
     const s = createSnake(10, 10, scripted([9, 9]));
     s.body = [{ x: 5, y: 5 }, { x: 5, y: 4 }, { x: 4, y: 4 }, { x: 4, y: 5 }];
-    s.dir = { x: -1, y: 0 };
+    s.dir = { x: -1, y: 0 }; s.next = { x: -1, y: 0 };
     s.apple = { x: 9, y: 9 };
     step(s, scripted([9, 9]));
     expect(s.alive).toBe(false);
@@ -3766,7 +4756,7 @@ describe('step', () => {
   it('survives moving into the cell its own tail is vacating', () => {
     const s = createSnake(10, 10, scripted([9, 9]));
     s.body = [{ x: 5, y: 5 }, { x: 5, y: 4 }, { x: 4, y: 4 }, { x: 4, y: 5 }];
-    s.dir = { x: 0, y: 1 };   // into (5,6), free; the classic bug is a false hit on the last segment
+    s.dir = { x: 0, y: 1 }; s.next = { x: 0, y: 1 };
     s.apple = { x: 9, y: 9 };
     step(s, scripted([9, 9]));
     expect(s.alive).toBe(true);
@@ -3807,8 +4797,8 @@ Expected: FAIL — `Failed to resolve import "./rules.js"`.
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Snake rules. Pure: no PixiJS, no DOM, no engine imports. Everything decidable without a screen
-// lives here so the node project can test it at speed.
+// Snake rules. Pure: no renderer, no DOM, no engine. Everything decidable without a screen lives here,
+// so the node project tests it at speed.
 export interface Cell { x: number; y: number }
 
 export interface SnakeState {
@@ -3826,8 +4816,8 @@ export interface SnakeState {
 
 /** Pick a free cell. `rand(n)` must return an integer in [0, n). */
 function placeApple(s: SnakeState, rand: (n: number) => number): Cell {
-  // Rejection sampling is fine here: the board is never near full in a reference game, and the
-  // alternative (enumerating free cells) allocates every single time the apple moves.
+  // Rejection sampling: the board is never near full in a reference game, and enumerating free cells
+  // would allocate every time the apple moves.
   for (let i = 0; i < 500; i++) {
     const c = { x: rand(s.cols), y: rand(s.rows) };
     if (!s.body.some((b) => b.x === c.x && b.y === c.y)) return c;
@@ -3853,10 +4843,9 @@ export function createSnake(cols: number, rows: number, rand: (n: number) => num
 /**
  * Queue a direction for the next step.
  *
- * Reversal is refused, because turning back drives the head straight into the neck and reads as an
- * unfair instant death. It is checked against the QUEUED direction, not the current one: two turns
- * inside a single frame would otherwise sneak a reversal past the guard. A snake of length one has no
- * neck, so it may turn freely.
+ * Reversal is refused: turning back drives the head into the neck and reads as an unfair instant death.
+ * It is checked against the QUEUED direction, not the current one, because two turns inside one frame
+ * would otherwise sneak a reversal past the guard. A snake of length one has no neck and may turn.
  */
 export function turn(s: SnakeState, dir: Cell): void {
   if (dir.x === 0 && dir.y === 0) return;
@@ -3870,13 +4859,12 @@ export function step(s: SnakeState, rand: (n: number) => number): void {
   s.dir = s.next;
 
   const head = { x: s.body[0]!.x + s.dir.x, y: s.body[0]!.y + s.dir.y };
-
   if (head.x < 0 || head.y < 0 || head.x >= s.cols || head.y >= s.rows) { s.alive = false; return; }
 
   const ate = head.x === s.apple.x && head.y === s.apple.y;
 
-  // The tail cell is only an obstacle when the snake is growing; otherwise it moves out of the way in
-  // this very step, and treating it as solid is the classic false death every Snake gets wrong once.
+  // The tail cell is only an obstacle while growing; otherwise it moves out of the way in this very
+  // step, and treating it as solid is the false death every Snake gets wrong once.
   const solid = ate ? s.body : s.body.slice(0, -1);
   if (solid.some((c) => c.x === head.x && c.y === head.y)) { s.alive = false; return; }
 
@@ -3894,25 +4882,22 @@ Expected: PASS, 15 tests.
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Snake's own strings. Registered under the slug when this chunk loads, so no other game downloads
-// them and no other game's keys collide with these.
-import type { GameStrings } from '../../../engine/core/i18n.js';
+// Snake's own strings, registered under its slug when this chunk loads. No other game downloads them
+// and no other game's keys collide with them.
+import type { GameStrings } from '../../../engine/game-api.js';
 
 export const strings: GameStrings = {
   pt: {
-    title: 'Snake',
     start: 'Use as setas ou WASD para mover.',
     ate: '{score} maçãs',
     gameOver: 'Você bateu. {score} maçãs.',
   },
   en: {
-    title: 'Snake',
     start: 'Use the arrows or WASD to move.',
     ate: '{score} apples',
     gameOver: 'You crashed. {score} apples.',
   },
   es: {
-    title: 'Snake',
     start: 'Usa las flechas o WASD para moverte.',
     ate: '{score} manzanas',
     gameOver: 'Chocaste. {score} manzanas.',
@@ -3925,15 +4910,13 @@ export const strings: GameStrings = {
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Snake — the reference game. Thin by design: rules live in rules.ts, and everything accessible
-// (contrast, colour-vision filters, screen-reader regions, pause, scaling) comes from the shell.
+// (contrast, colour-vision filters, live regions, pause, scaling, language) comes from the shell.
 //
-// The accessibility cost of this file is three things and nothing else: role tags on the four sprite
-// kinds, a dictionary in three languages, and four srSay calls. That is the budget every other game
-// in the collection is meant to fit into.
-import type { Sprite } from 'pixi.js';
-import type { GameContext, GameMeta } from '../../../engine/shell/boot.js';
-import { LOGICAL_H, LOGICAL_W } from '../../../engine/core/constants.js';
-import { createSnake, step, turn, type SnakeState } from './rules.js';
+// The accessibility cost of this file is three things: a role tag on each of the two sprite kinds, a
+// dictionary in three languages, and three announcements. That is the budget every other game in the
+// collection is meant to fit into.
+import type { GameContext, GameInstance, GameMeta, Handle } from '../../../engine/game-api.js';
+import { createSnake, step, turn } from './rules.js';
 import { strings } from './strings.js';
 
 export { strings };
@@ -3947,144 +4930,132 @@ export const meta: GameMeta = {
 };
 
 const CELL = 8;
-const COLS = Math.floor(LOGICAL_W / CELL);          // 40
-const ROWS = Math.floor(LOGICAL_H / CELL);          // 22
-const OFFSET_Y = Math.floor((LOGICAL_H - ROWS * CELL) / 2);
 /** Frames between cell advances. dt is in frames, so this is a count, never milliseconds. */
 const FRAMES_PER_STEP = 6;
 
-let ctx: GameContext;
-let state: SnakeState;
-let accum = 0;
-let segments: Sprite[] = [];
-let apple: Sprite | null = null;
-let over = false;
+export function create(ctx: GameContext): GameInstance {
+  const cols = Math.floor(ctx.view.w / CELL);
+  const rows = Math.floor(ctx.view.h / CELL);
+  const offsetY = Math.floor((ctx.view.h - rows * CELL) / 2);
 
-const block = (role: 'player' | 'pickup'): Sprite =>
-  ctx.sprites.make({
-    role,
-    w: CELL, h: CELL,
-    // The requested colours are what the game looks like with contrast OFF. With contrast on the
-    // engine replaces them by role and keeps this silhouette.
-    paint: (px) => px(1, 1, CELL - 2, CELL - 2, role === 'player' ? '#b8ff3d' : '#ff2d8e'),
-  });
+  // All state is local to this closure. Restarting builds a new one, so nothing survives a run.
+  const state = createSnake(cols, rows, (n) => ctx.rng.randInt(0, n - 1));
+  const segments: Handle[] = [];
+  let accum = 0;
+  let over = false;
 
-function place(s: Sprite, cx: number, cy: number): void {
-  s.x = cx * CELL;
-  s.y = cy * CELL + OFFSET_Y;
-}
+  const block = (role: 'player' | 'pickup'): Handle =>
+    ctx.scene.add({
+      role,
+      w: CELL, h: CELL,
+      // These colours are what the game looks like with contrast OFF. With it on, the engine replaces
+      // them by role and keeps this silhouette.
+      paint: (px) => px(1, 1, CELL - 2, CELL - 2, role === 'player' ? '#b8ff3d' : '#ff2d8e'),
+    });
 
-function syncSprites(): void {
-  while (segments.length < state.body.length) {
-    const s = block('player');
-    ctx.stage.addChild(s);
-    segments.push(s);
+  const apple = block('pickup');
+
+  const place = (h: Handle, cx: number, cy: number): void => {
+    h.x = cx * CELL;
+    h.y = cy * CELL + offsetY;
+  };
+
+  function sync(): void {
+    while (segments.length < state.body.length) segments.push(block('player'));
+    while (segments.length > state.body.length) ctx.scene.remove(segments.pop()!);
+    state.body.forEach((c, i) => place(segments[i]!, c.x, c.y));
+    place(apple, state.apple.x, state.apple.y);
   }
-  while (segments.length > state.body.length) ctx.stage.removeChild(segments.pop()!);
-  state.body.forEach((c, i) => place(segments[i]!, c.x, c.y));
-  if (apple) place(apple, state.apple.x, state.apple.y);
-}
 
-export function setup(c: GameContext): void {
-  ctx = c;
-  over = false;
-  accum = 0;
-  segments = [];
-  state = createSnake(COLS, ROWS, (n) => ctx.rng.randInt(0, n - 1));
-
-  apple = block('pickup');
-  ctx.stage.addChild(apple);
-  syncSprites();
-
+  sync();
   ctx.srSay(ctx.t('start'));
-}
 
-export function update(dt: number): void {
-  if (over) return;
+  return {
+    update(dt) {
+      if (over) return;
 
-  if (ctx.input.pressed(0, 'up')) turn(state, { x: 0, y: -1 });
-  if (ctx.input.pressed(0, 'down')) turn(state, { x: 0, y: 1 });
-  if (ctx.input.pressed(0, 'left')) turn(state, { x: -1, y: 0 });
-  if (ctx.input.pressed(0, 'right')) turn(state, { x: 1, y: 0 });
+      if (ctx.input.pressed(0, 'up')) turn(state, { x: 0, y: -1 });
+      if (ctx.input.pressed(0, 'down')) turn(state, { x: 0, y: 1 });
+      if (ctx.input.pressed(0, 'left')) turn(state, { x: -1, y: 0 });
+      if (ctx.input.pressed(0, 'right')) turn(state, { x: 1, y: 0 });
 
-  accum += dt;
-  if (accum < FRAMES_PER_STEP) return;
-  accum -= FRAMES_PER_STEP;
+      accum += dt;
+      if (accum < FRAMES_PER_STEP) return;
+      accum -= FRAMES_PER_STEP;
 
-  const before = state.score;
-  step(state, (n) => ctx.rng.randInt(0, n - 1));
-  syncSprites();
+      const before = state.score;
+      step(state, (n) => ctx.rng.randInt(0, n - 1));
+      sync();
 
-  if (state.score !== before) {
-    ctx.audio.beep(880, 40);
-    ctx.srSay(ctx.t('ate', { score: state.score }));
-  }
+      if (state.score !== before) {
+        ctx.audio.beep(880, 40);
+        ctx.srSay(ctx.t('ate', { score: state.score }));
+      }
 
-  if (!state.alive) {
-    over = true;
-    ctx.audio.beep(110, 240);
-    ctx.srAlert(ctx.t('gameOver', { score: state.score }));
-    ctx.onGameOver(state.score);
-  }
-}
+      if (!state.alive) {
+        over = true;
+        ctx.audio.beep(110, 240);
+        ctx.srAlert(ctx.t('gameOver', { score: state.score }));
+        ctx.onGameOver(state.score);
+      }
+    },
 
-export function teardown(): void {
-  for (const s of segments) ctx.stage.removeChild(s);
-  if (apple) ctx.stage.removeChild(apple);
-  segments = [];
-  apple = null;
+    teardown() {
+      for (const s of segments) ctx.scene.remove(s);
+      segments.length = 0;
+      ctx.scene.remove(apple);
+    },
+  };
 }
 ```
 
-- [ ] **Step 7: Run the boot tests that were failing in Task 12**
+- [ ] **Step 7: Run the conformance test, the boot tests and the dependency check**
 
-Run: `npx vitest run --project browser engine/shell/boot.browser.test.ts`
-Expected: PASS, all 7 — the two "boots a real game" cases now find Snake.
+Run: `npx vitest run`
+Expected: PASS everywhere. `conformance` now has a game to police; the two boot cases that waited for
+Snake go green.
 
-- [ ] **Step 8: Run the whole suite and typecheck**
+Run: `npm run lint:deps`
+Expected: `no dependency violations found` — Snake imports only `game-api`.
 
-Run: `npx tsc --noEmit && npx vitest run`
-Expected: no typecheck output; every test passes.
+- [ ] **Step 8: See it actually run**
 
-- [ ] **Step 9: See it actually run**
-
-Run: `npm run build && npm run preview`
-Then open `http://localhost:4173/play.html#arcade-classico/snake`.
+Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/snake`.
 
 Confirm by looking, not by assuming:
 - the snake moves and turns with both the arrows and WASD;
-- eating an apple lengthens it and the score in the header rises;
+- eating an apple lengthens it and the header score rises;
 - hitting a wall stops the game;
 - `Escape` opens the pause dialog and `Tab` cycles inside it without escaping;
-- in the console, `__demos.contrast.set(7)` repaints the snake and the apple into the high-contrast palette, with a white outline on each block.
+- in the console, `__demos.visual.setLevel(7)` repaints the snake and apple into the high-contrast
+  palette, each block outlined in white.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add games/arcade-classico/snake/
 git commit -m "feat: add Snake, the first reference game
 
-Establishes the shape every later game copies: pure rules tested in node, a
-three-locale dictionary, and a main.ts that only renders and reads input. Its
-entire accessibility cost is four role tags, one dictionary and four srSay
-calls."
+Establishes the shape the other 382 copy: pure rules in the node project, a
+three-locale dictionary, and a create(ctx) factory whose state is closed over
+rather than parked at module scope. Its only engine import is game-api."
 ```
 
 ---
 
-### Task 14: Pong — two-player input
+### Task 15: Pong — two-player input
 
 **Files:**
-- Create: `games/arcade-classico/pong/rules.ts`, `games/arcade-classico/pong/strings.ts`, `games/arcade-classico/pong/main.ts`
+- Create: `games/arcade-classico/pong/rules.ts`, `strings.ts`, `main.ts`
 - Test: `games/arcade-classico/pong/rules.test.ts`
 
 **Interfaces:**
-- Consumes: `GameContext`, `GameMeta` from Task 12; `LOGICAL_W`, `LOGICAL_H` from Task 1.
-- Produces: nothing other tasks consume. Its job is to prove `players: 2` works end to end — two independent key schemes driving two paddles from one `InputApi`.
+- Consumes: `engine/game-api.ts` only.
+- Produces: nothing other tasks consume. Its job is to prove `players: 2` works end to end.
 
-> Pong is here for the input layer, not the game. Snake never touches `held` (it turns on edges) and
-> never uses a second player. If `attachInput` had the two schemes crossed, Snake would pass and every
-> two-player game in the collection would be broken.
+> Pong is here for the input layer, not the game. Snake never calls `held` and never uses a second
+> scheme. If `attachInput` had the two schemes crossed, Snake would pass and every two-player game in
+> the collection would be broken.
 
 - [ ] **Step 1: Write the failing rules test**
 
@@ -4106,38 +5077,39 @@ describe('createPong', () => {
 
   it('centres both paddles', () => {
     const s = fresh();
-    expect(s.paddles[0]!.y).toBe(s.paddles[1]!.y);
+    expect(s.paddles[0].y).toBe(s.paddles[1].y);
   });
 });
 
 describe('movePaddle', () => {
   it('moves a paddle by the step given', () => {
     const s = fresh();
-    const before = s.paddles[0]!.y;
+    const before = s.paddles[0].y;
     movePaddle(s, 0, 1, 1);
-    expect(s.paddles[0]!.y).toBeGreaterThan(before);
+    expect(s.paddles[0].y).toBeGreaterThan(before);
   });
 
-  it('scales the step by dt, so a slow frame does not slow the paddle', () => {
+  it('scales the step by dt', () => {
     const a = fresh(); const b = fresh();
+    const start = a.paddles[0].y;
     movePaddle(a, 0, 1, 1);
     movePaddle(b, 0, 1, 2);
-    expect(b.paddles[0]!.y - a.paddles[0]!.y).toBeCloseTo(a.paddles[0]!.y - fresh().paddles[0]!.y, 6);
+    expect(b.paddles[0].y - start).toBeCloseTo((a.paddles[0].y - start) * 2, 6);
   });
 
   it('clamps at the top and bottom rather than leaving the field', () => {
     const s = fresh();
     movePaddle(s, 0, -1, 1000);
-    expect(s.paddles[0]!.y).toBe(0);
+    expect(s.paddles[0].y).toBe(0);
     movePaddle(s, 0, 1, 1000);
-    expect(s.paddles[0]!.y).toBe(s.h - s.paddleH);
+    expect(s.paddles[0].y).toBe(s.h - s.paddleH);
   });
 
   it('moves only the paddle asked for', () => {
     const s = fresh();
-    const other = s.paddles[1]!.y;
+    const other = s.paddles[1].y;
     movePaddle(s, 0, 1, 5);
-    expect(s.paddles[1]!.y).toBe(other);
+    expect(s.paddles[1].y).toBe(other);
   });
 });
 
@@ -4171,9 +5143,8 @@ describe('advance', () => {
   it('scores for the right player when the ball leaves on the left', () => {
     const s = fresh();
     s.ball.x = 1; s.ball.vx = -6;
-    const scored = advance(s, 1);
+    expect(advance(s, 1)).toBe(1);
     expect(s.score).toEqual([0, 1]);
-    expect(scored).toBe(1);
   });
 
   it('scores for the left player when the ball leaves on the right', () => {
@@ -4192,7 +5163,7 @@ describe('advance', () => {
 
   it('bounces off a paddle and reverses direction', () => {
     const s = fresh();
-    s.paddles[0]!.y = 40;
+    s.paddles[0].y = 40;
     s.ball.x = s.paddleW + 1;
     s.ball.y = 44;
     s.ball.vx = -4; s.ball.vy = 0;
@@ -4202,13 +5173,13 @@ describe('advance', () => {
 
   it('deflects up off the top of a paddle and down off the bottom', () => {
     const up = fresh();
-    up.paddles[0]!.y = 40;
+    up.paddles[0].y = 40;
     up.ball.x = up.paddleW + 1; up.ball.y = 41; up.ball.vx = -4; up.ball.vy = 0;
     advance(up, 1);
     expect(up.ball.vy).toBeLessThan(0);
 
     const down = fresh();
-    down.paddles[0]!.y = 40;
+    down.paddles[0].y = 40;
     down.ball.x = down.paddleW + 1;
     down.ball.y = 40 + down.paddleH - 1;
     down.ball.vx = -4; down.ball.vy = 0;
@@ -4238,7 +5209,7 @@ Expected: FAIL — `Failed to resolve import "./rules.js"`.
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Pong rules. Pure: no PixiJS, no DOM, no engine imports.
+// Pong rules. Pure: no renderer, no DOM, no engine.
 export interface Paddle { y: number }
 export interface Ball { x: number; y: number; vx: number; vy: number; size: number }
 
@@ -4252,7 +5223,6 @@ export interface PongState {
 }
 
 export const WIN_SCORE = 5;
-
 const BALL_SPEED = 2.2;
 
 export function createPong(w: number, h: number): PongState {
@@ -4269,7 +5239,7 @@ export function createPong(w: number, h: number): PongState {
 
 /** Move one paddle. `dir` is -1, 0 or 1; `dt` is in FRAMES. Clamped to the field. */
 export function movePaddle(s: PongState, i: 0 | 1, dir: number, dt: number): void {
-  const p = s.paddles[i]!;
+  const p = s.paddles[i];
   p.y = Math.max(0, Math.min(s.h - s.paddleH, p.y + dir * s.paddleSpeed * dt));
 }
 
@@ -4283,9 +5253,9 @@ function serve(s: PongState, towards: -1 | 1): void {
 /**
  * Advance one frame. Returns the index of the player who just scored, or null.
  *
- * Paddle contact is an overlap test rather than a swept one: the ball is slow relative to its own
- * size here, and the paddle is a wall the full height of its span, so there is nothing to tunnel
- * through. Breakout, whose ball is fast and whose bricks are thin, uses the swept test instead.
+ * Paddle contact is an overlap test rather than a swept one: the ball is slow relative to its own size
+ * and the paddle is a wall the full height of its span, so there is nothing to tunnel through.
+ * Breakout, whose ball is fast and whose bricks are thin, uses the swept test instead.
  */
 export function advance(s: PongState, dt: number): 0 | 1 | null {
   if (s.winner !== null) return null;
@@ -4298,14 +5268,14 @@ export function advance(s: PongState, dt: number): 0 | 1 | null {
 
   for (const i of [0, 1] as const) {
     const px = i === 0 ? 0 : s.w - s.paddleW;
-    const p = s.paddles[i]!;
+    const p = s.paddles[i];
     const hitX = s.ball.x <= px + s.paddleW && s.ball.x + s.ball.size >= px;
     const hitY = s.ball.y + s.ball.size >= p.y && s.ball.y <= p.y + s.paddleH;
     const movingInto = i === 0 ? s.ball.vx < 0 : s.ball.vx > 0;
     if (hitX && hitY && movingInto) {
       s.ball.vx = -s.ball.vx;
-      // Where on the paddle it landed steers the return: -1 at the top edge, +1 at the bottom. This
-      // is what makes Pong a game rather than a demo — without it every rally is identical.
+      // Where on the paddle it landed steers the return: -1 at the top edge, +1 at the bottom. Without
+      // it every rally is identical, which is the difference between a game and a demo.
       const rel = (s.ball.y + s.ball.size / 2 - p.y) / s.paddleH;
       s.ball.vy = (rel - 0.5) * 2 * BALL_SPEED;
       s.ball.x = i === 0 ? px + s.paddleW : px - s.ball.size;
@@ -4315,7 +5285,7 @@ export function advance(s: PongState, dt: number): 0 | 1 | null {
   if (s.ball.x + s.ball.size < 0) {
     s.score[1]++;
     if (s.score[1] >= WIN_SCORE) { s.winner = 1; return 1; }
-    serve(s, -1);   // serve back towards the player who conceded
+    serve(s, -1);
     return 1;
   }
   if (s.ball.x > s.w) {
@@ -4337,23 +5307,20 @@ Expected: PASS, 15 tests.
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { GameStrings } from '../../../engine/core/i18n.js';
+import type { GameStrings } from '../../../engine/game-api.js';
 
 export const strings: GameStrings = {
   pt: {
-    title: 'Pong',
     start: 'Jogador 1: W e S. Jogador 2: seta para cima e seta para baixo.',
     point: 'Ponto do jogador {who}. {a} a {b}.',
     gameOver: 'Jogador {who} venceu por {a} a {b}.',
   },
   en: {
-    title: 'Pong',
     start: 'Player 1: W and S. Player 2: up arrow and down arrow.',
     point: 'Point for player {who}. {a} to {b}.',
     gameOver: 'Player {who} won {a} to {b}.',
   },
   es: {
-    title: 'Pong',
     start: 'Jugador 1: W y S. Jugador 2: flecha arriba y flecha abajo.',
     point: 'Punto para el jugador {who}. {a} a {b}.',
     gameOver: 'El jugador {who} ganó {a} a {b}.',
@@ -4366,11 +5333,9 @@ export const strings: GameStrings = {
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Pong. Two players from one InputApi: paddle 0 reads player 0's scheme, paddle 1 reads player 1's.
-// Movement uses `held`, not `pressed` — a paddle must keep moving while the key is down.
-import type { Sprite } from 'pixi.js';
-import type { GameContext, GameMeta } from '../../../engine/shell/boot.js';
-import { LOGICAL_H, LOGICAL_W } from '../../../engine/core/constants.js';
-import { advance, createPong, movePaddle, type PongState } from './rules.js';
+// Movement uses `held`, not `pressed` — a paddle keeps moving while the key is down.
+import type { GameContext, GameInstance, GameMeta, Handle } from '../../../engine/game-api.js';
+import { advance, createPong, movePaddle } from './rules.js';
 import { strings } from './strings.js';
 
 export { strings };
@@ -4384,81 +5349,73 @@ export const meta: GameMeta = {
 };
 
 const FIELD_H = 176;
-const TOP = Math.floor((LOGICAL_H - FIELD_H) / 2);
 
-let ctx: GameContext;
-let state: PongState;
-let paddles: [Sprite, Sprite] | null = null;
-let ball: Sprite | null = null;
-let done = false;
+export function create(ctx: GameContext): GameInstance {
+  const top = Math.floor((ctx.view.h - FIELD_H) / 2);
+  const state = createPong(ctx.view.w, FIELD_H);
+  let done = false;
 
-export function setup(c: GameContext): void {
-  ctx = c;
-  done = false;
-  state = createPong(LOGICAL_W, FIELD_H);
+  const mk = (w: number, h: number, role: 'player' | 'pickup', col: string): Handle =>
+    ctx.scene.add({ role, w, h, paint: (px) => px(0, 0, w, h, col) });
 
-  // Both paddles are 'player': to a player using high contrast, both are things a person controls.
-  // Tagging one of them 'hazard' would be a lie about what the colour means everywhere else.
-  const mk = (w: number, h: number, role: 'player' | 'pickup', col: string): Sprite =>
-    ctx.sprites.make({ role, w, h, paint: (px) => px(0, 0, w, h, col) });
-
-  paddles = [
+  // Both paddles are 'player': to someone using high contrast, both are things a person controls.
+  // Tagging one 'hazard' would be a lie about what that colour means everywhere else in the collection.
+  const paddles: [Handle, Handle] = [
     mk(state.paddleW, state.paddleH, 'player', '#00d9ff'),
     mk(state.paddleW, state.paddleH, 'player', '#ff2d8e'),
   ];
-  ball = mk(state.ball.size, state.ball.size, 'pickup', '#ececf2');
+  const ball = mk(state.ball.size, state.ball.size, 'pickup', '#ececf2');
 
-  for (const s of [...paddles, ball]) ctx.stage.addChild(s);
   paddles[0].x = 0;
-  paddles[1].x = LOGICAL_W - state.paddleW;
+  paddles[1].x = ctx.view.w - state.paddleW;
+
+  function render(): void {
+    paddles[0].y = top + state.paddles[0].y;
+    paddles[1].y = top + state.paddles[1].y;
+    ball.x = state.ball.x;
+    ball.y = top + state.ball.y;
+  }
 
   render();
   ctx.srSay(ctx.t('start'));
-}
 
-function render(): void {
-  if (!paddles || !ball) return;
-  paddles[0].y = TOP + state.paddles[0].y;
-  paddles[1].y = TOP + state.paddles[1].y;
-  ball.x = state.ball.x;
-  ball.y = TOP + state.ball.y;
-}
+  return {
+    update(dt) {
+      if (done) return;
 
-export function update(dt: number): void {
-  if (done) return;
+      for (const i of [0, 1] as const) {
+        const dir = (ctx.input.held(i, 'down') ? 1 : 0) - (ctx.input.held(i, 'up') ? 1 : 0);
+        if (dir !== 0) movePaddle(state, i, dir, dt);
+      }
 
-  for (const i of [0, 1] as const) {
-    const dir = (ctx.input.held(i, 'down') ? 1 : 0) - (ctx.input.held(i, 'up') ? 1 : 0);
-    if (dir !== 0) movePaddle(state, i, dir, dt);
-  }
+      const scorer = advance(state, dt);
+      render();
+      if (scorer === null) return;
 
-  const scorer = advance(state, dt);
-  render();
+      ctx.audio.beep(scorer === 0 ? 660 : 440, 60);
+      const params = { who: scorer + 1, a: state.score[0], b: state.score[1] };
+      if (state.winner === null) {
+        ctx.srSay(ctx.t('point', params));
+      } else {
+        done = true;
+        ctx.srAlert(ctx.t('gameOver', params));
+        ctx.onGameOver(Math.max(state.score[0], state.score[1]));
+      }
+    },
 
-  if (scorer === null) return;
-
-  ctx.audio.beep(scorer === 0 ? 660 : 440, 60);
-  const params = { who: scorer + 1, a: state.score[0], b: state.score[1] };
-  if (state.winner === null) {
-    ctx.srSay(ctx.t('point', params));
-  } else {
-    done = true;
-    ctx.srAlert(ctx.t('gameOver', params));
-    ctx.onGameOver(Math.max(state.score[0], state.score[1]));
-  }
-}
-
-export function teardown(): void {
-  for (const s of [...(paddles ?? []), ball]) if (s) ctx.stage.removeChild(s);
-  paddles = null;
-  ball = null;
+    teardown() {
+      ctx.scene.remove(paddles[0]);
+      ctx.scene.remove(paddles[1]);
+      ctx.scene.remove(ball);
+    },
+  };
 }
 ```
 
-- [ ] **Step 7: Run the whole suite and typecheck**
+- [ ] **Step 7: Run everything**
 
-Run: `npx tsc --noEmit && npx vitest run`
-Expected: no typecheck output; every test passes.
+Run: `npx tsc --noEmit && npx vitest run && npm run lint:deps && npm run format:check`
+Expected: all clean.
 
 - [ ] **Step 8: See it run and confirm the two schemes are not crossed**
 
@@ -4466,7 +5423,7 @@ Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#a
 
 - W and S must move the LEFT paddle only; the up and down arrows the RIGHT paddle only.
 - Pressing both at once must move both, independently.
-- A ball hitting the top of a paddle must come off upwards, and the bottom downwards.
+- A ball hitting the top of a paddle must come off upwards, the bottom downwards.
 
 - [ ] **Step 9: Commit**
 
@@ -4474,27 +5431,27 @@ Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#a
 git add games/arcade-classico/pong/
 git commit -m "feat: add Pong, proving two-player input
 
-Snake never uses held() and never uses a second scheme, so crossed player
-bindings would have passed unnoticed until every two-player game in the
-collection was broken."
+Snake never calls held() and never uses a second scheme, so crossed player
+bindings would have gone unnoticed until every two-player game was broken."
 ```
 
 ---
 
-### Task 15: Breakout — swept collision and FX
+
+### Task 16: Breakout — swept collision and role separation
 
 **Files:**
-- Create: `games/arcade-classico/breakout/rules.ts`, `games/arcade-classico/breakout/strings.ts`, `games/arcade-classico/breakout/main.ts`
+- Create: `games/arcade-classico/breakout/rules.ts`, `strings.ts`, `main.ts`
 - Test: `games/arcade-classico/breakout/rules.test.ts`
 
 **Interfaces:**
-- Consumes: `sweptAabb`, `type Box` from Task 3; `GameContext`, `GameMeta` from Task 12.
-- Produces: nothing other tasks consume. It is the case that proves the swept collision primitive is actually load-bearing.
+- Consumes: `sweptAabb`, `type Box`, and the game types — all from `engine/game-api.ts`.
+- Produces: nothing other tasks consume. It is the case that proves the swept primitive is load-bearing.
 
-> Breakout is the third reference game because it is the one that breaks if `sweptAabb` is wrong. Its
+> Breakout is the third reference game because it is the one that breaks if `sweptAabb` is wrong: its
 > ball crosses several times a brick's thickness per frame, so an overlap-only engine lets it fly
-> through the wall. This is the task that turns Task 3 from a plausible-looking function into a tested
-> claim.
+> through the wall. It is also the game where the role tags earn their keep — a player who cannot
+> separate ball from brick cannot play it at all.
 
 - [ ] **Step 1: Write the failing rules test**
 
@@ -4614,7 +5571,7 @@ describe('advance', () => {
   it('bounces off the paddle and steers by where it landed', () => {
     const s = fresh();
     s.paddle.x = 100;
-    s.ball.x = 100 + 2;                        // near the left end of the paddle
+    s.ball.x = 102;
     s.ball.y = s.paddle.y - s.ball.size;
     s.ball.vx = 0; s.ball.vy = 3;
     advance(s, 1);
@@ -4625,8 +5582,8 @@ describe('advance', () => {
   it('is won when the last brick falls', () => {
     const s = fresh();
     for (const b of s.bricks) b.alive = false;
-    s.bricks[0]!.alive = true;
     const brick = s.bricks[0]!;
+    brick.alive = true;
     s.ball.x = brick.x + brick.w / 2;
     s.ball.y = brick.y + brick.h + 1;
     s.ball.vx = 0; s.ball.vy = -3;
@@ -4653,8 +5610,9 @@ Expected: FAIL — `Failed to resolve import "./rules.js"`.
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Breakout rules. Pure apart from the engine's collision primitive, which is itself pure.
-import { sweptAabb, type Box } from '../../../engine/core/collision.js';
+// Breakout rules. Pure apart from the collision primitive, which is itself pure and comes through the
+// public game API rather than by reaching into the engine.
+import { sweptAabb, type Box } from '../../../engine/game-api.js';
 
 export interface Brick extends Box { alive: boolean }
 export interface Ball { x: number; y: number; vx: number; vy: number; size: number }
@@ -4706,13 +5664,12 @@ function resetBall(s: BreakoutState): void {
 }
 
 /**
- * Advance one frame. Returns 'brick', 'paddle', 'wall', 'life' or null, so the caller knows which
- * sound to make without re-deriving what happened.
+ * Advance one frame. Returns what happened, so the caller can pick a sound without re-deriving it.
  *
- * The brick pass is SWEPT, not an overlap test. At full speed the ball travels several times a
- * brick's thickness in one frame, and an overlap test would find it already past the wall with
- * nothing to report. Only the EARLIEST hit is resolved: breaking a whole column in one frame because
- * the path crossed four bricks would turn one shot into four points.
+ * The brick pass is SWEPT. At full speed the ball travels several times a brick's thickness in one
+ * frame, and an overlap test would find it already past the wall with nothing to report. Only the
+ * EARLIEST hit resolves: breaking a whole column because the path crossed four bricks would turn one
+ * shot into four points.
  */
 export function advance(s: BreakoutState, dt: number): 'brick' | 'paddle' | 'wall' | 'life' | null {
   if (s.over || s.won) return null;
@@ -4754,6 +5711,7 @@ export function advance(s: BreakoutState, dt: number): 'brick' | 'paddle' | 'wal
     s.ball.y = p.y - s.ball.size;
     s.ball.vy = -Math.abs(s.ball.vy);
     // Where it landed steers the return, same idea as Pong: the paddle is an aiming tool, not a wall.
+    // Two occurrences is not a pattern; this is extracted into the engine at the third, not before.
     const rel = (s.ball.x + s.ball.size / 2 - p.x) / p.w;
     s.ball.vx = (rel - 0.5) * 2 * 3;
     return 'paddle';
@@ -4761,8 +5719,7 @@ export function advance(s: BreakoutState, dt: number): 'brick' | 'paddle' | 'wal
 
   if (s.ball.y > s.h) {
     s.lives--;
-    if (s.lives <= 0) { s.lives = 0; s.over = true; }
-    else resetBall(s);
+    if (s.lives <= 0) { s.lives = 0; s.over = true; } else resetBall(s);
     return 'life';
   }
 
@@ -4779,25 +5736,22 @@ Expected: PASS, 14 tests — including the tunnelling case, which is the point o
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { GameStrings } from '../../../engine/core/i18n.js';
+import type { GameStrings } from '../../../engine/game-api.js';
 
 export const strings: GameStrings = {
   pt: {
-    title: 'Breakout',
     start: 'Use as setas ou A e D para mover a raquete.',
     life: 'Você perdeu uma bola. Restam {lives}.',
     won: 'Parede destruída. {score} tijolos.',
     gameOver: 'Fim de jogo. {score} tijolos.',
   },
   en: {
-    title: 'Breakout',
     start: 'Use the arrows or A and D to move the paddle.',
     life: 'You lost a ball. {lives} left.',
     won: 'Wall cleared. {score} bricks.',
     gameOver: 'Game over. {score} bricks.',
   },
   es: {
-    title: 'Breakout',
     start: 'Usa las flechas o A y D para mover la paleta.',
     life: 'Perdiste una bola. Quedan {lives}.',
     won: 'Muro destruido. {score} ladrillos.',
@@ -4810,14 +5764,12 @@ export const strings: GameStrings = {
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Breakout. The role tags earn their keep here: bricks are 'goal' (what you are trying to remove),
-// the paddle is 'player', the ball is 'pickup'. In high contrast those three become three provably
-// distinct colours, which matters more in this game than in the other two — a player who cannot
-// separate ball from brick cannot play it at all.
-import type { Sprite } from 'pixi.js';
-import type { GameContext, GameMeta } from '../../../engine/shell/boot.js';
-import { LOGICAL_H, LOGICAL_W } from '../../../engine/core/constants.js';
-import { advance, createBreakout, movePaddle, type BreakoutState } from './rules.js';
+// Breakout. The role tags earn their keep here: bricks are 'goal' (what you are removing), the paddle
+// is 'player', the ball is 'pickup'. In high contrast those become three provably distinct colours,
+// which matters more here than in the other two — someone who cannot separate ball from brick cannot
+// play this at all.
+import type { GameContext, GameInstance, GameMeta, Handle } from '../../../engine/game-api.js';
+import { advance, createBreakout, movePaddle } from './rules.js';
 import { strings } from './strings.js';
 
 export { strings };
@@ -4831,94 +5783,88 @@ export const meta: GameMeta = {
 };
 
 const FIELD_H = 176;
-const TOP = Math.floor((LOGICAL_H - FIELD_H) / 2);
+const BRICK_COLOURS = ['#ff2d8e', '#ffd60a', '#00d9ff', '#b8ff3d'];
 
-let ctx: GameContext;
-let state: BreakoutState;
-let brickSprites: Sprite[] = [];
-let paddle: Sprite | null = null;
-let ball: Sprite | null = null;
-let finished = false;
+export function create(ctx: GameContext): GameInstance {
+  const top = Math.floor((ctx.view.h - FIELD_H) / 2);
+  const state = createBreakout(ctx.view.w, FIELD_H);
+  let finished = false;
 
-export function setup(c: GameContext): void {
-  ctx = c;
-  finished = false;
-  state = createBreakout(LOGICAL_W, FIELD_H);
+  const mk = (w: number, h: number, role: 'player' | 'pickup' | 'goal', col: string): Handle =>
+    ctx.scene.add({ role, w, h, paint: (px) => px(0, 0, w, h, col) });
 
-  const mk = (w: number, h: number, role: 'player' | 'pickup' | 'goal', col: string): Sprite =>
-    ctx.sprites.make({ role, w, h, paint: (px) => px(0, 0, w, h, col) });
-
-  brickSprites = state.bricks.map((b, i) => {
-    const s = mk(b.w, b.h, 'goal', ['#ff2d8e', '#ffd60a', '#00d9ff', '#b8ff3d'][i % 4]!);
-    s.x = b.x;
-    s.y = TOP + b.y;
-    ctx.stage.addChild(s);
-    return s;
+  const brickHandles = state.bricks.map((b, i) => {
+    const h = mk(b.w, b.h, 'goal', BRICK_COLOURS[i % BRICK_COLOURS.length]!);
+    h.x = b.x;
+    h.y = top + b.y;
+    return h;
   });
+  const paddle = mk(state.paddle.w, state.paddle.h, 'player', '#ececf2');
+  const ball = mk(state.ball.size, state.ball.size, 'pickup', '#ffffff');
 
-  paddle = mk(state.paddle.w, state.paddle.h, 'player', '#ececf2');
-  ball = mk(state.ball.size, state.ball.size, 'pickup', '#ffffff');
-  ctx.stage.addChild(paddle);
-  ctx.stage.addChild(ball);
+  function render(): void {
+    state.bricks.forEach((b, i) => { brickHandles[i]!.visible = b.alive; });
+    paddle.x = state.paddle.x;
+    paddle.y = top + state.paddle.y;
+    ball.x = state.ball.x;
+    ball.y = top + state.ball.y;
+  }
 
   render();
   ctx.srSay(ctx.t('start'));
-}
 
-function render(): void {
-  state.bricks.forEach((b, i) => { brickSprites[i]!.visible = b.alive; });
-  if (paddle) { paddle.x = state.paddle.x; paddle.y = TOP + state.paddle.y; }
-  if (ball) { ball.x = state.ball.x; ball.y = TOP + state.ball.y; }
-}
+  return {
+    update(dt) {
+      if (finished) return;
 
-export function update(dt: number): void {
-  if (finished) return;
+      const dir = (ctx.input.held(0, 'right') ? 1 : 0) - (ctx.input.held(0, 'left') ? 1 : 0);
+      if (dir !== 0) movePaddle(state, dir, dt);
 
-  const dir = (ctx.input.held(0, 'right') ? 1 : 0) - (ctx.input.held(0, 'left') ? 1 : 0);
-  if (dir !== 0) movePaddle(state, dir, dt);
+      const event = advance(state, dt);
+      render();
 
-  const event = advance(state, dt);
-  render();
+      if (event === 'brick') ctx.audio.beep(660, 30);
+      if (event === 'paddle') ctx.audio.beep(440, 30);
+      if (event === 'wall') ctx.audio.beep(330, 20);
+      if (event === 'life' && !state.over) {
+        ctx.audio.beep(180, 120);
+        ctx.srSay(ctx.t('life', { lives: state.lives }));
+      }
 
-  if (event === 'brick') { ctx.audio.beep(660, 30); }
-  if (event === 'paddle') { ctx.audio.beep(440, 30); }
-  if (event === 'wall') { ctx.audio.beep(330, 20); }
-  if (event === 'life' && !state.over) { ctx.audio.beep(180, 120); ctx.srSay(ctx.t('life', { lives: state.lives })); }
+      if (state.won) {
+        finished = true;
+        ctx.srAlert(ctx.t('won', { score: state.score }));
+        ctx.onGameOver(state.score);
+      } else if (state.over) {
+        finished = true;
+        ctx.audio.beep(110, 240);
+        ctx.srAlert(ctx.t('gameOver', { score: state.score }));
+        ctx.onGameOver(state.score);
+      }
+    },
 
-  if (state.won) {
-    finished = true;
-    ctx.srAlert(ctx.t('won', { score: state.score }));
-    ctx.onGameOver(state.score);
-  } else if (state.over) {
-    finished = true;
-    ctx.audio.beep(110, 240);
-    ctx.srAlert(ctx.t('gameOver', { score: state.score }));
-    ctx.onGameOver(state.score);
-  }
-}
-
-export function teardown(): void {
-  for (const s of brickSprites) ctx.stage.removeChild(s);
-  if (paddle) ctx.stage.removeChild(paddle);
-  if (ball) ctx.stage.removeChild(ball);
-  brickSprites = [];
-  paddle = null;
-  ball = null;
+    teardown() {
+      for (const h of brickHandles) ctx.scene.remove(h);
+      brickHandles.length = 0;
+      ctx.scene.remove(paddle);
+      ctx.scene.remove(ball);
+    },
+  };
 }
 ```
 
-- [ ] **Step 7: Run the whole suite and typecheck**
+- [ ] **Step 7: Run everything**
 
-Run: `npx tsc --noEmit && npx vitest run`
-Expected: no typecheck output; every test passes.
+Run: `npx tsc --noEmit && npx vitest run && npm run lint:deps && npm run format:check`
+Expected: all clean. The conformance suite now polices three games.
 
 - [ ] **Step 8: See it run**
 
 Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/breakout`.
 
-- The ball must never pass through a brick, however fast it is moving.
+- The ball must never pass through a brick, however fast it moves.
 - Exactly one brick disappears per contact.
-- `__demos.contrast.set(7)` in the console must leave the paddle, the ball and the bricks visibly
+- `__demos.visual.setLevel(7)` in the console must leave the paddle, the ball and the bricks visibly
   different from one another — that is the whole promise of the role tags.
 
 - [ ] **Step 9: Commit**
@@ -4934,7 +5880,7 @@ shot down a column would score four."
 
 ---
 
-### Task 16: Import the catalog into data
+### Task 17: Import the catalog into data
 
 **Files:**
 - Create: `scripts/catalog-parse.mts`, `scripts/import-catalog.mts`, `data/catalog.json` (generated)
@@ -4942,14 +5888,18 @@ shot down a column would score four."
 
 **Interfaces:**
 - Consumes: `minigames-catalog-v2.html` at the repository root.
-- Produces:
-  - From `catalog-parse.mts`: `slugify(name)`, `uniqueSlug(name, taken)`, `parseCatalog(html): Catalog`, and the types `Catalog`, `Category`, `Item`.
-  - `data/catalog.json` — the source of truth from here on.
+- Produces: `slugify(name)`, `uniqueSlug(name, taken)`, `parseCatalog(html): Catalog`, the types `Catalog`, `Category`, `Item`, and `data/catalog.json`.
 
-> The parser is a separate module from the script so it can be tested without a file system. The script
-> is the one-shot: it runs once, its output is committed, and after that `data/catalog.json` is edited
-> directly. Keeping the script afterwards is still worth it — it documents exactly how the JSON was
-> derived, which is the question anyone will ask when a field looks wrong.
+> The parser is separate from the script so it can be tested against a string. The script is the
+> one-shot: run it once, commit the output, edit the JSON from then on. Keeping the script afterwards is
+> still worth it — it documents how the data was derived, which is the first question anyone asks when a
+> field looks wrong.
+>
+> **It is strict on purpose.** The first draft defaulted a missing density to `leve` and a missing id to
+> `0`. That is being liberal in what you accept exactly where RFC 9413 says not to be: a card the parser
+> half-understood would produce a plausible-looking entry that is silently wrong, and nobody would find
+> it until a category rendered with the wrong colour. A malformed card now stops the import and names
+> itself.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5010,6 +5960,13 @@ describe('slugify', () => {
   it('produces something even for a name with no usable characters', () => {
     expect(slugify('???')).toBe('item');
   });
+
+  it('always produces a slug the router will accept', () => {
+    const shape = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    for (const n of ['Arcade Clássico', 'Snake / Cobrinha', '  ...Whack-a-Mole!  ', 'Espelhos & laser', '2048']) {
+      expect(slugify(n), n).toMatch(shape);
+    }
+  });
 });
 
 describe('uniqueSlug', () => {
@@ -5018,8 +5975,7 @@ describe('uniqueSlug', () => {
   });
 
   it('suffixes rather than overwriting a taken slug', () => {
-    const taken = new Set(['pong']);
-    expect(uniqueSlug('Pong', taken)).toBe('pong-2');
+    expect(uniqueSlug('Pong', new Set(['pong']))).toBe('pong-2');
   });
 
   it('keeps counting past the first collision', () => {
@@ -5083,6 +6039,38 @@ describe('parseCatalog', () => {
     expect(new Set(c.items.map((i) => i.slug)).size).toBe(c.items.length);
   });
 });
+
+describe('parseCatalog is strict', () => {
+  const withoutCat = CARD.replace('card cat-1', 'card');
+  const withoutTitle = CARD.replace('<h3 class="card-title">Arcade Clássico</h3>', '');
+  const withoutDensity = CARD.replace('data-level="leve"', '');
+  const badDensity = CARD.replace('data-level="leve"', 'data-level="medium"');
+  const emptyList = CARD.replace(/<ul>[\s\S]*?<\/ul>/, '<ul></ul>');
+
+  it('refuses a card with no cat-N class instead of guessing zero', () => {
+    expect(() => parseCatalog(withoutCat)).toThrow(/cat-N/);
+  });
+
+  it('refuses a card with no title', () => {
+    expect(() => parseCatalog(withoutTitle)).toThrow(/title/i);
+  });
+
+  it('refuses a card with no density instead of assuming the easiest one', () => {
+    expect(() => parseCatalog(withoutDensity)).toThrow(/density/i);
+  });
+
+  it('refuses a density outside the three known values', () => {
+    expect(() => parseCatalog(badDensity)).toThrow(/medium/);
+  });
+
+  it('refuses a category with no items', () => {
+    expect(() => parseCatalog(emptyList)).toThrow(/no items/i);
+  });
+
+  it('names the offending card, so the message is actionable', () => {
+    expect(() => parseCatalog(badDensity)).toThrow(/Arcade Clássico/);
+  });
+});
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -5094,12 +6082,13 @@ Expected: FAIL — `Failed to resolve import "./catalog-parse.mts"`.
 
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Parse the hand-written catalog page into data. Separated from the script that reads and writes
-// files so it can be tested against a string.
+// Parse the hand-written catalog page into data. Separated from the script that reads and writes files
+// so it can be tested against a string.
 import { parse } from 'node-html-parser';
 
 export type Density = 'leve' | 'medio' | 'denso';
 export type Status = 'todo' | 'wip' | 'done';
+const DENSITIES: readonly string[] = ['leve', 'medio', 'denso'];
 
 export interface Item {
   slug: string;
@@ -5150,31 +6139,54 @@ export function uniqueSlug(name: string, taken: ReadonlySet<string>): string {
   return `${base}-${n}`;
 }
 
+/**
+ * Read the page into data, refusing anything it only half-understands.
+ *
+ * Strictness is the whole design here. A tolerant parser would emit a card with density `leve` and
+ * accent `c0` from markup it failed to read, and that entry would look completely ordinary in the JSON.
+ * The failure would surface months later as a category rendered in the wrong colour, with nothing
+ * pointing back to this function. Refusing early, naming the card, costs one clear error instead.
+ */
 export function parseCatalog(html: string): Catalog {
   const root = parse(html);
-  const categories: Category[] = root.querySelectorAll('article.card').map((card): Category => {
-    const catClass = (card.classNames.split(/\s+/).find((c) => /^cat-\d+$/.test(c)) ?? 'cat-0');
-    const id = Number(catClass.slice(4));
-    const title = card.querySelector('.card-title')?.textContent.trim() ?? '';
-    const taken = new Set<string>();
+  const cards = root.querySelectorAll('article.card');
+  if (cards.length === 0) throw new Error('parseCatalog: no article.card found — is this the right file?');
 
+  const categories = cards.map((card): Category => {
+    const title = card.querySelector('.card-title')?.textContent.trim() ?? '';
+    const where = title || card.querySelector('.card-num')?.textContent.trim() || '(unnamed card)';
+    if (!title) throw new Error(`parseCatalog: card has no .card-title (near "${where}")`);
+
+    const catClass = card.classNames.split(/\s+/).find((c) => /^cat-\d+$/.test(c));
+    if (!catClass) throw new Error(`parseCatalog: "${title}" has no cat-N class, so it has no accent colour`);
+    const id = Number(catClass.slice(4));
+
+    const density = card.querySelector('.density-dots')?.getAttribute('data-level');
+    if (!density) throw new Error(`parseCatalog: "${title}" has no density (data-level on .density-dots)`);
+    if (!DENSITIES.includes(density)) {
+      throw new Error(`parseCatalog: "${title}" has density "${density}", expected one of ${DENSITIES.join(', ')}`);
+    }
+
+    const taken = new Set<string>();
     const items = card.querySelectorAll('ul > li').map((li): Item => {
       const small = li.querySelector('small');
       const hint = small?.textContent.trim() ?? '';
       // Remove the hint before reading the name, or the name would swallow it.
       if (small) small.remove();
       const name = li.textContent.replace(/\s+/g, ' ').trim();
+      if (!name) throw new Error(`parseCatalog: "${title}" has an empty <li>`);
       const slug = uniqueSlug(name, taken);
       taken.add(slug);
       return { slug, name, hint, fresh: li.classNames.split(/\s+/).includes('fresh'), status: 'todo', aliasOf: null };
     });
+    if (items.length === 0) throw new Error(`parseCatalog: "${title}" has no items`);
 
     return {
       id,
       slug: slugify(title),
       title,
       desc: card.querySelector('.card-desc')?.textContent.trim() ?? '',
-      density: (card.querySelector('.density-dots')?.getAttribute('data-level') ?? 'leve') as Density,
+      density: density as Density,
       accent: `c${id}`,
       new: card.querySelector('.new-badge') !== null,
       items,
@@ -5188,7 +6200,7 @@ export function parseCatalog(html: string): Catalog {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run --project node scripts/catalog-parse.test.mts`
-Expected: PASS, 16 tests.
+Expected: PASS, 22 tests.
 
 - [ ] **Step 5: Write `scripts/import-catalog.mts`**
 
@@ -5196,8 +6208,8 @@ Expected: PASS, 16 tests.
 // SPDX-License-Identifier: GPL-3.0-or-later
 // One-shot: minigames-catalog-v2.html -> data/catalog.json.
 //
-// Run once; commit the output; edit the JSON from then on. The script stays in the repository as the
-// record of how the data was derived, which is the first question anyone asks when a field looks off.
+// Run once; commit the output; edit the JSON from then on. The script stays as the record of how the
+// data was derived.
 //
 //   node --experimental-strip-types scripts/import-catalog.mts
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -5205,8 +6217,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseCatalog } from './catalog-parse.mts';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, '..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const html = readFileSync(resolve(root, 'minigames-catalog-v2.html'), 'utf8');
 const catalog = parseCatalog(html);
@@ -5224,8 +6235,8 @@ console.log('wrote data/catalog.json');
 Run: `node --experimental-strip-types scripts/import-catalog.mts`
 Expected: `parsed 35 categories, 383 items`, then `wrote data/catalog.json`.
 
-If the counts differ from 35 and 383, stop and find out why before continuing — those are the numbers
-measured from the source page, and a mismatch means the parser dropped something.
+If the counts differ from 35 and 383, or the script throws, stop and find out why. Those are the numbers
+measured from the source page, and the parser is strict precisely so a mismatch surfaces here.
 
 - [ ] **Step 7: Mark the three built games as done**
 
@@ -5238,14 +6249,18 @@ whose slugs are `snake`, `pong` and `breakout`.
 git add scripts/catalog-parse.mts scripts/catalog-parse.test.mts scripts/import-catalog.mts data/catalog.json
 git commit -m "feat: import the catalog page into data/catalog.json
 
-The parser is a tested module and the script is the one-shot around it. Slugs
-take the part before a slash, because 'Snake / Cobrinha' names one game that
-everyone will call snake."
+The parser refuses a card it only half-understands rather than defaulting the
+density and the accent: a tolerant parser would emit an ordinary-looking entry
+that is silently wrong, and the failure would surface months later as a
+category in the wrong colour with nothing pointing back here.
+
+Slugs take the part before a slash, because 'Snake / Cobrinha' names one game
+that everyone will call snake."
 ```
 
 ---
 
-### Task 17: Generate the catalog page
+### Task 18: Generate the catalog page
 
 **Files:**
 - Create: `scripts/catalog-render.mts`, `scripts/build-catalog.mts`, `src/catalog.template.html`
@@ -5253,7 +6268,7 @@ everyone will call snake."
 - Test: `scripts/catalog-render.test.mts`
 
 **Interfaces:**
-- Consumes: `data/catalog.json` and the types from Task 16.
+- Consumes: `data/catalog.json` and the types from Task 17.
 - Produces: `renderGrid(catalog): string`, `computeStats(catalog): Stats`, `renderPage(template, catalog): string`, and the generated `index.html`.
 
 > This is where D8 pays off: the six invariants that had to be swept by hand — the `--cN` token, the
@@ -5567,7 +6582,8 @@ See the design spec, section 5, for what happened to minigames-catalog-v2.html."
 
 ---
 
-### Task 18: PWA, the accessibility gate and CI
+
+### Task 19: PWA, the accessibility gate and CI
 
 **Files:**
 - Modify: `vite.config.ts`, `package.json`
@@ -5698,10 +6714,9 @@ console.log('\n✓ axe: DOM shell clean. Canvas contents are NOT covered — see
 
 - [ ] **Step 4: Add the scripts**
 
-Add to `package.json`:
+Add to `package.json` — `validate` already exists from Tasks 1 and 12, so only extend it:
 ```json
-"test:a11y": "node scripts/axe-check.mjs",
-"validate": "npm run typecheck && vitest run && npm run build"
+"test:a11y": "node scripts/axe-check.mjs"
 ```
 
 - [ ] **Step 5: Run the gate locally**
@@ -5743,6 +6758,15 @@ typecheck:
     - *install
     - npm run typecheck
 
+# The D15 boundary and the formatter are gates, not suggestions: a game that reaches past game-api.ts,
+# or a file nobody formatted, fails here rather than setting a precedent.
+lint:
+  stage: check
+  script:
+    - *install
+    - npm run format:check
+    - npm run lint:deps
+
 test:
   stage: check
   script:
@@ -5775,8 +6799,8 @@ a11y:
     - AXE_URL=http://localhost:4173 node scripts/axe-check.mjs
 ```
 
-Add `wait-on` to `devDependencies` (`npm i -D wait-on`) and configure Vitest's JUnit reporter by adding
-to the `test` block in `vite.config.ts`:
+`wait-on` is already a devDependency from Task 1. Configure Vitest's JUnit reporter by adding to the
+`test` block in `vite.config.ts`:
 ```ts
     reporters: process.env['CI'] ? ['default', 'junit'] : ['default'],
     outputFile: { junit: 'junit.xml' },
@@ -5803,25 +6827,26 @@ output that it cannot see inside the canvas."
 
 ---
 
-### Task 19: Make the accessibility settings reachable
+
+### Task 20: Make the accessibility settings reachable
 
 **Files:**
-- Modify: `play.html` (pause dialog), `engine/shell/pause.ts` (already handles focus; no change needed to its logic)
+- Modify: `play.html` (pause dialog), `engine/shell/shell.css`
 - Create: `engine/shell/settings.ts`
 - Test: `engine/shell/settings.browser.test.ts`
 
 **Interfaces:**
-- Consumes: `setLocale`, `availableLocales`, `t` from Task 4; `setContrastLevel`, `getContrastLevel` from Task 8; `setViz`, `getViz`, `VIZ_MODES` from Task 9; `storage` from Task 2.
-- Produces: `mountSettings(region: HTMLElement): void`, called once by `boot`.
+- Consumes: `I18n` (Task 4), `VisualState` (Task 8), `Viz` (Task 9), `storage` (Task 2).
+- Produces: `mountSettings(deps: SettingsDeps): void`, called by `boot` and again on every language change.
 
-> **Why this task exists.** The self-review of this plan against the spec found that Tasks 4, 8 and 9
-> build language switching, high contrast and colour-vision filters, and then leave every one of them
-> reachable only from the browser console. A person who needs high contrast cannot open a console. An
-> accessibility feature nobody can turn on is not an accessibility feature, so the controls are part of
-> Phase 1 rather than a later polish pass.
+> **Why this task exists.** Tasks 4, 8 and 9 build language switching, high contrast and colour-vision
+> filters, and leave every one of them reachable only from the browser console. A person who needs high
+> contrast cannot open a console. An accessibility feature nobody can turn on is not an accessibility
+> feature, so the controls are part of Phase 1 rather than a later polish pass.
 >
-> They live in the pause dialog, which already has the focus contract from Task 11 — no second modal,
-> no second focus trap to get wrong.
+> They live in the pause dialog, which already has the focus contract from Task 11 — no second modal, no
+> second focus trap to get wrong. And they take their collaborators as arguments, like everything else
+> here, so the test drives them without touching a global.
 
 - [ ] **Step 1: Add the controls to the pause dialog in `play.html`**
 
@@ -5856,29 +6881,34 @@ Add to `engine/shell/shell.css`:
 ```ts
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getContrastLevel, setContrastLevel } from '../render/high-contrast.js';
-import { getViz } from '../render/viz.js';
+import { createI18n } from '../core/i18n.js';
+import { createVisualState } from '../render/high-contrast.js';
+import { createViz } from '../render/viz.js';
 import { mountSettings } from './settings.js';
 
 let region: HTMLElement;
+let deps: Parameters<typeof mountSettings>[0];
 
 beforeEach(() => {
-  vi.stubGlobal('localStorage', (() => {
-    const m = new Map<string, string>();
-    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); } };
-  })());
-  setContrastLevel(0);
+  const m = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => { m.set(k, v); },
+    removeItem: (k: string) => { m.delete(k); },
+  });
   document.body.innerHTML = `
     <div id="game-region">
-      <select id="set-lang"></select>
+      <label for="set-lang">L</label><select id="set-lang"></select>
+      <label for="set-contrast">C</label>
       <select id="set-contrast">
         <option value="0">off</option><option value="3">3</option>
         <option value="4.5">4.5</option><option value="7">7</option>
       </select>
-      <select id="set-viz"></select>
+      <label for="set-viz">V</label><select id="set-viz"></select>
     </div>`;
   region = document.querySelector('#game-region')!;
-  mountSettings(region);
+  deps = { root: document, region, i18n: createI18n(), visual: createVisualState(), viz: createViz(region) };
+  mountSettings(deps);
 });
 
 const pick = (id: string, value: string): void => {
@@ -5887,13 +6917,18 @@ const pick = (id: string, value: string): void => {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
-describe('settings controls', () => {
+describe('mountSettings', () => {
   it('fills the language select with the three floor languages', () => {
     expect(document.querySelectorAll('#set-lang option').length).toBe(3);
   });
 
+  it('names each language IN that language, so nobody is trapped in one they cannot read', () => {
+    const labels = [...document.querySelectorAll('#set-lang option')].map((o) => o.textContent);
+    expect(labels).toEqual(['Português', 'English', 'Español']);
+  });
+
   it('fills the colour select from the viz mode table', () => {
-    expect(document.querySelectorAll('#set-viz option').length).toBeGreaterThan(1);
+    expect(document.querySelectorAll('#set-viz option').length).toBe(8);
   });
 
   it('labels every option with translated text rather than a raw key', () => {
@@ -5904,20 +6939,20 @@ describe('settings controls', () => {
   });
 
   it('shows the current contrast level as the selected option', () => {
-    setContrastLevel(4.5);
-    mountSettings(region);
+    deps.visual.setLevel(4.5);
+    mountSettings(deps);
     expect(document.querySelector<HTMLSelectElement>('#set-contrast')!.value).toBe('4.5');
   });
 
   it('changes the contrast level when the control changes', () => {
     pick('#set-contrast', '7');
-    expect(getContrastLevel()).toBe(7);
+    expect(deps.visual.level()).toBe(7);
   });
 
   it('turns contrast back off', () => {
     pick('#set-contrast', '7');
     pick('#set-contrast', '0');
-    expect(getContrastLevel()).toBe(0);
+    expect(deps.visual.level()).toBe(0);
   });
 
   it('persists the contrast level so it survives a reload', () => {
@@ -5927,15 +6962,26 @@ describe('settings controls', () => {
 
   it('applies a colour-vision mode to the game region', () => {
     pick('#set-viz', 'fix-deuter');
-    expect(getViz()).toBe('fix-deuter');
+    expect(deps.viz.mode()).toBe('fix-deuter');
     expect(region.style.filter).toContain('url(#cvd-');
   });
 
-  it('every control has a label associated by id', () => {
+  it('switches the language', async () => {
+    pick('#set-lang', 'en');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(deps.i18n.locale()).toBe('en');
+  });
+
+  it('every control is associated with a label', () => {
     for (const id of ['set-lang', 'set-contrast', 'set-viz']) {
-      const el = document.querySelector(`#${id}`)!;
-      expect(el.getAttribute('id'), id).toBe(id);
+      expect(document.querySelector(`label[for="${id}"]`), id).not.toBeNull();
     }
+  });
+
+  it('re-mounting does not duplicate the options', () => {
+    mountSettings(deps);
+    mountSettings(deps);
+    expect(document.querySelectorAll('#set-lang option').length).toBe(3);
   });
 });
 ```
@@ -5952,67 +6998,72 @@ Expected: FAIL — `Failed to resolve import "./settings.js"`.
 // shell/settings — the three accessibility controls, inside the pause dialog.
 //
 // They are plain <select> elements on purpose. A custom widget would need its own keyboard handling,
-// its own ARIA and its own testing, and would end up worse than what every browser and every screen
+// its own ARIA and its own tests, and would end up worse than what every browser and every screen
 // reader already implements correctly for a select.
-import { availableLocales, setLocale, getLocale, t } from '../core/i18n.js';
-import { getContrastLevel, setContrastLevel, type ContrastLevel } from '../render/high-contrast.js';
-import { getViz, setViz, VIZ_MODES, type VizKey } from '../render/viz.js';
 import * as store from '../platform/storage.js';
-import { $ } from '../ui/dom.js';
+import type { I18n } from '../core/i18n.js';
+import type { VisualState, ContrastLevel } from '../render/high-contrast.js';
+import { VIZ_MODES, type Viz, type VizKey } from '../render/viz.js';
 
+export interface SettingsDeps {
+  root: ParentNode;
+  region: HTMLElement;
+  i18n: I18n;
+  visual: VisualState;
+  viz: Viz;
+}
+
+// Language names are written in their OWN language and never translated. Someone who cannot read the
+// current interface language must still be able to find their way out of it.
 const LANG_LABEL: Record<string, string> = { pt: 'Português', en: 'English', es: 'Español' };
 
-/** Wire the controls. Safe to call again — it rebuilds the options and re-reads the current values. */
-export function mountSettings(region: HTMLElement): void {
-  const lang = $<HTMLSelectElement>('#set-lang');
+const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+/** Wire the controls. Safe to call again: it rebuilds the options and re-reads the current values. */
+export function mountSettings({ root, region, i18n, visual, viz }: SettingsDeps): void {
+  const lang = root.querySelector<HTMLSelectElement>('#set-lang');
   if (lang) {
-    // Language names are written in their OWN language, never translated. Someone who cannot read the
-    // current interface language must still be able to find their way out of it.
-    lang.innerHTML = availableLocales()
-      .map((c) => `<option value="${c}">${LANG_LABEL[c] ?? c}</option>`).join('');
-    lang.value = getLocale();
-    lang.onchange = () => { void setLocale(lang.value); };
+    lang.innerHTML = i18n.available()
+      .map((c) => `<option value="${c}">${esc(LANG_LABEL[c] ?? c)}</option>`).join('');
+    lang.value = i18n.locale();
+    lang.onchange = () => { void i18n.setLocale(lang.value); };
   }
 
-  const contrast = $<HTMLSelectElement>('#set-contrast');
+  const contrast = root.querySelector<HTMLSelectElement>('#set-contrast');
   if (contrast) {
-    contrast.value = String(getContrastLevel());
+    contrast.value = String(visual.level());
     contrast.onchange = () => {
       const level = Number(contrast.value) as ContrastLevel;
-      setContrastLevel(level);
+      visual.setLevel(level);
       store.set(store.KEYS.contrast, level);
     };
   }
 
-  const viz = $<HTMLSelectElement>('#set-viz');
-  if (viz) {
-    viz.innerHTML = VIZ_MODES.map((m) => `<option value="${m.key}">${t(m.i18nKey)}</option>`).join('');
-    viz.value = getViz();
-    viz.onchange = () => setViz(viz.value as VizKey, region);
+  const vizSel = root.querySelector<HTMLSelectElement>('#set-viz');
+  if (vizSel) {
+    vizSel.innerHTML = VIZ_MODES.map((m) => `<option value="${m.key}">${esc(i18n.t(m.i18nKey))}</option>`).join('');
+    vizSel.value = viz.mode();
+    vizSel.onchange = () => viz.set(vizSel.value as VizKey);
   }
+
+  void region; // region is the viz target, already captured when createViz was built
 }
 ```
 
-- [ ] **Step 5: Call it from `boot.ts`**
+> The trailing `void region` is a smell — the parameter is in the dependency object because callers find
+> it natural to pass, but nothing here uses it. Delete `region` from `SettingsDeps` and from the two call
+> sites in `boot.ts`. `noUnusedParameters` will not catch a destructured field, which is exactly how the
+> unused `host` parameter survived the first draft. Verify with `npm run typecheck` after removing it.
 
-Add the import and one call, just before `region.focus()`:
-```ts
-import { mountSettings } from './settings.js';
-// …
-  mountSettings(region);
-  // The language select must be rebuilt after a switch, or it keeps showing the previous choice.
-  window.addEventListener('i18n:change', () => mountSettings(region));
-```
-
-- [ ] **Step 6: Run the test and the whole suite**
+- [ ] **Step 5: Run the test, the full suite and the checks**
 
 Run: `npx vitest run --project browser engine/shell/settings.browser.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 12 tests.
 
-Run: `npx tsc --noEmit && npx vitest run`
-Expected: no typecheck output; every test passes.
+Run: `npx tsc --noEmit && npx vitest run && npm run lint:deps && npm run format:check`
+Expected: all clean.
 
-- [ ] **Step 7: Verify by hand, with the keyboard only**
+- [ ] **Step 6: Verify by hand, with the keyboard only**
 
 Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/breakout`.
 
@@ -6024,31 +7075,31 @@ Using **no mouse at all**:
 - Choose English — the pause labels and the game's own announcements must both change.
 - `Escape` to resume; the game continues with the new settings.
 
-- [ ] **Step 8: Re-run the accessibility gate**
+- [ ] **Step 7: Re-run the accessibility gate**
 
-Run the gate as in Task 18. A `<select>` without an associated label is the most likely new violation;
-if it appears, fix the `for`/`id` pairing rather than excluding the element.
+Run the gate as in Task 19. A `<select>` without an associated label is the likeliest new violation; if
+it appears, fix the `for`/`id` pairing rather than excluding the element.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add play.html engine/shell/shell.css engine/shell/settings.ts engine/shell/settings.browser.test.ts engine/shell/boot.ts
 git commit -m "feat: expose language, contrast and colour-vision controls
 
-Tasks 4, 8 and 9 built these and left them reachable only from a console,
-which a person who needs high contrast cannot open. Plain selects, inside the
-pause dialog that already has the focus contract. Language names are written
-in their own language so nobody is trapped in a language they cannot read."
+Tasks 4, 8 and 9 built these and left them reachable only from a console, which
+a person who needs high contrast cannot open. Plain selects, inside the pause
+dialog that already has the focus contract. Language names are written in their
+own language so nobody is trapped in a language they cannot read."
 ```
 
 ---
 
 ## Definition of done for Phase 1
 
-Phase 1 is finished when all of the following are true, verified by running them rather than by
-reading the checkboxes:
+Phase 1 is finished when all of the following are true, verified by running them rather than by reading
+the checkboxes:
 
-- [ ] `npm run validate` passes: typecheck clean, every test green, build succeeds.
+- [ ] `npm run validate` passes: formatting, typecheck, the D15 dependency boundary, every test, and the build.
 - [ ] `npm run test:a11y` passes against the built preview.
 - [ ] The catalog at `/` shows 35 categories and 383 items, with exactly three live links.
 - [ ] Snake, Pong and Breakout are each playable from the keyboard alone, with no mouse.
@@ -6057,5 +7108,9 @@ reading the checkboxes:
 - [ ] Raising the contrast to 7:1 visibly repaints all three games, and every role stays distinguishable.
 - [ ] Switching the language changes the shell and the game announcements together.
 - [ ] After playing a game once, it still loads with the network offline.
-- [ ] `CLAUDE.md` is rewritten to describe the structure that now exists, replacing the Phase 0 text
-      that says there is no build command.
+- [ ] A game that throws stops once, says so through the live region, and leaves the pause menu usable —
+      check by temporarily making Snake's `update` throw, then reverting.
+- [ ] No engine module holds mutable state at module scope, and no test needs a cleanup hook to undo the
+      previous one. `grep -rnE "^(export )?let " engine/` returns nothing outside a factory body.
+- [ ] `CLAUDE.md` is rewritten to describe the structure that now exists, replacing the Phase 0 text that
+      says there is no build command.
