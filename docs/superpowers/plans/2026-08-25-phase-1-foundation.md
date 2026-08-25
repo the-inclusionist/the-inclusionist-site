@@ -3471,6 +3471,10 @@ const MARKUP = `
           <button type="button" role="menuitem" data-act="restart">Reiniciar</button>
           <button type="button" role="menuitem" data-act="quit">Voltar</button>
         </div>
+        <div class="settings">
+          <label for="set-contrast">C</label>
+          <select id="set-contrast"><option value="0">off</option></select>
+        </div>
       </div>
     </div>
   </div>`;
@@ -3513,18 +3517,34 @@ describe('createPause', () => {
     expect(document.activeElement).toBe(before);
   });
 
-  it('wraps Tab from the last item back to the first', () => {
+  it('TABS INTO A SETTING, not only the menu buttons', () => {
+    // The regression this pins down: a trap that cycles [data-act] alone leaves every accessibility
+    // control in the dialog unreachable by keyboard, which defeats the reason they are there.
     pause.open(() => {});
     document.querySelector<HTMLElement>('[data-act="quit"]')!.focus();
+    panel.dispatchEvent(tab());
+    expect(document.activeElement).toBe(document.querySelector('#set-contrast'));
+  });
+
+  it('wraps Tab from the last focusable back to the first', () => {
+    pause.open(() => {});
+    document.querySelector<HTMLElement>('#set-contrast')!.focus();
     panel.dispatchEvent(tab());
     expect(document.activeElement).toBe(document.querySelector('[data-act="resume"]'));
   });
 
-  it('wraps Shift+Tab from the first item back to the last', () => {
+  it('wraps Shift+Tab from the first focusable back to the last', () => {
     pause.open(() => {});
     document.querySelector<HTMLElement>('[data-act="resume"]')!.focus();
     panel.dispatchEvent(tab(true));
-    expect(document.activeElement).toBe(document.querySelector('[data-act="quit"]'));
+    expect(document.activeElement).toBe(document.querySelector('#set-contrast'));
+  });
+
+  it('does not fire an action when a setting is clicked', () => {
+    const seen: PauseAction[] = [];
+    pause.open((a) => seen.push(a));
+    document.querySelector<HTMLElement>('#set-contrast')!.click();
+    expect(seen).toEqual([]);
   });
 
   it('reports the action of the button that was clicked', () => {
@@ -3686,7 +3706,13 @@ export function createPause(panel: HTMLElement): Pause {
   let restoreFocus: HTMLElement | null = null;
   let handler: ((a: PauseAction) => void) | null = null;
 
-  const items = (): HTMLElement[] => [...panel.querySelectorAll<HTMLElement>('[data-act]')];
+  // TWO lists, deliberately. Every focusable control in the dialog belongs to the Tab cycle, but only
+  // [data-act] elements carry an action. Conflating them was a real bug: while the trap cycled
+  // [data-act] alone, the accessibility selects added in Task 20 could never be reached by keyboard —
+  // the one thing they exist for — because every Tab was preventDefault'd and redirected to a button.
+  const FOCUSABLE = 'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])';
+  const focusables = (): HTMLElement[] =>
+    [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.hasAttribute('disabled'));
 
   function close(): void {
     panel.hidden = true;
@@ -3706,7 +3732,7 @@ export function createPause(panel: HTMLElement): Pause {
     if (!open) return;
     if (e.key === 'Escape') { e.preventDefault(); act('resume'); return; }
     if (e.key !== 'Tab') return;
-    const list = items();
+    const list = focusables();
     if (list.length === 0) return;
     e.preventDefault();
     const i = list.indexOf(document.activeElement as HTMLElement);
@@ -3714,6 +3740,7 @@ export function createPause(panel: HTMLElement): Pause {
     list[next]!.focus();
   }
 
+  // Actions come from [data-act] only: a <select> in the dialog is a setting, not a menu command.
   function onClick(e: Event): void {
     if (!open) return;
     const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
@@ -3730,7 +3757,7 @@ export function createPause(panel: HTMLElement): Pause {
       restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       panel.hidden = false;
       open = true;
-      items()[0]?.focus();
+      focusables()[0]?.focus();
     },
     close,
     isOpen: () => open,
@@ -3788,7 +3815,7 @@ export function createAudio(): Audio {
 - [ ] **Step 8: Run all three, typecheck and format**
 
 Run: `npx vitest run engine/shell/hud engine/shell/pause engine/platform/audio`
-Expected: PASS. `hud` 7, `pause` 11, `audio` 5.
+Expected: PASS. `hud` 7, `pause` 14, `audio` 5.
 
 Run: `npx tsc --noEmit && npm run format:check`
 Expected: no output from either.
@@ -4565,13 +4592,13 @@ export async function startShell(): Promise<void> {
     });
   });
 
-  mountSettings({ root: document, region, i18n, visual, viz });
+  mountSettings({ root: document, i18n, visual, viz });
 
   // Canvas text is invisible to applyDom, which only walks [data-i18n] in the DOM. Restarting the game
   // is the blunt way to redraw it, and it means the discipline lives here instead of in 383 games.
   i18n.onChange(() => {
     i18n.applyDom(document);
-    mountSettings({ root: document, region, i18n, visual, viz });
+    mountSettings({ root: document, i18n, visual, viz });
     session?.restart();
   });
 
@@ -6907,7 +6934,7 @@ beforeEach(() => {
       <label for="set-viz">V</label><select id="set-viz"></select>
     </div>`;
   region = document.querySelector('#game-region')!;
-  deps = { root: document, region, i18n: createI18n(), visual: createVisualState(), viz: createViz(region) };
+  deps = { root: document, i18n: createI18n(), visual: createVisualState(), viz: createViz(region) };
   mountSettings(deps);
 });
 
@@ -6925,6 +6952,13 @@ describe('mountSettings', () => {
   it('names each language IN that language, so nobody is trapped in one they cannot read', () => {
     const labels = [...document.querySelectorAll('#set-lang option')].map((o) => o.textContent);
     expect(labels).toEqual(['Português', 'English', 'Español']);
+  });
+
+  it('TAGS each language option with its own lang, so a screen reader pronounces it', () => {
+    // WCAG 3.1.2. Without this the rescue option reads with the wrong phonetics and stops being a
+    // rescue for the person who needs it.
+    const langs = [...document.querySelectorAll('#set-lang option')].map((o) => o.getAttribute('lang'));
+    expect(langs).toEqual(['pt-BR', 'en', 'es']);
   });
 
   it('fills the colour select from the viz mode table', () => {
@@ -7007,7 +7041,6 @@ import { VIZ_MODES, type Viz, type VizKey } from '../render/viz.js';
 
 export interface SettingsDeps {
   root: ParentNode;
-  region: HTMLElement;
   i18n: I18n;
   visual: VisualState;
   viz: Viz;
@@ -7015,16 +7048,23 @@ export interface SettingsDeps {
 
 // Language names are written in their OWN language and never translated. Someone who cannot read the
 // current interface language must still be able to find their way out of it.
+//
+// Which is precisely why each option needs its own `lang`: the text is deliberately in a language the
+// page is not, and without the attribute a screen reader pronounces "Português" with the phonetics of
+// whatever the document language happens to be — the option that exists to rescue someone becomes the
+// one they cannot recognise. WCAG 2.2, 3.1.2 Language of Parts.
 const LANG_LABEL: Record<string, string> = { pt: 'Português', en: 'English', es: 'Español' };
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
 /** Wire the controls. Safe to call again: it rebuilds the options and re-reads the current values. */
-export function mountSettings({ root, region, i18n, visual, viz }: SettingsDeps): void {
+export function mountSettings({ root, i18n, visual, viz }: SettingsDeps): void {
   const lang = root.querySelector<HTMLSelectElement>('#set-lang');
   if (lang) {
-    lang.innerHTML = i18n.available()
-      .map((c) => `<option value="${c}">${esc(LANG_LABEL[c] ?? c)}</option>`).join('');
+    lang.innerHTML = i18n
+      .available()
+      .map((c) => `<option value="${c}" lang="${i18n.bcp47(c)}">${esc(LANG_LABEL[c] ?? c)}</option>`)
+      .join('');
     lang.value = i18n.locale();
     lang.onchange = () => { void i18n.setLocale(lang.value); };
   }
@@ -7045,20 +7085,20 @@ export function mountSettings({ root, region, i18n, visual, viz }: SettingsDeps)
     vizSel.value = viz.mode();
     vizSel.onchange = () => viz.set(vizSel.value as VizKey);
   }
-
-  void region; // region is the viz target, already captured when createViz was built
 }
 ```
 
-> The trailing `void region` is a smell — the parameter is in the dependency object because callers find
-> it natural to pass, but nothing here uses it. Delete `region` from `SettingsDeps` and from the two call
-> sites in `boot.ts`. `noUnusedParameters` will not catch a destructured field, which is exactly how the
-> unused `host` parameter survived the first draft. Verify with `npm run typecheck` after removing it.
+> **No `region` parameter.** It is tempting, because the settings look like they act on the game area,
+> but nothing here touches it: `setLocale` writes `document.documentElement.lang` and re-runs `applyDom`
+> over the whole document, and the `viz` instance already closed over the region when `boot` built it. A
+> field that callers find natural to pass and nobody reads is the same defect as the unused `host`
+> parameter the audit removed from `initViz` — and `noUnusedParameters` does not catch a destructured
+> field, so only reading the body catches it.
 
 - [ ] **Step 5: Run the test, the full suite and the checks**
 
 Run: `npx vitest run --project browser engine/shell/settings.browser.test.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 Run: `npx tsc --noEmit && npx vitest run && npm run lint:deps && npm run format:check`
 Expected: all clean.
