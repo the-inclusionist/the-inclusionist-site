@@ -1,5 +1,35 @@
 # Phase 1 Foundation Implementation Plan
 
+> # 🛑 DO NOT EXECUTE THIS PLAN AS WRITTEN — 2026-08-25
+>
+> **This plan builds an engine. As of 2026-08-25 that is the wrong instruction**, and executing it would
+> create a SECOND engine on the same day the two repositories swapped roles.
+>
+> `SP-the-inclusionist-tracer` is now `inclusionist-engine`: the engine repository. The game leaves it and
+> comes here as one cartridge; the shell comes with it. The decisions are ADR-0035 (the engine is ours,
+> Phaser is read and never imported) and **ADR-0036** (this repository consumes the engine as a module —
+> "link locally, pin remotely"), both in `../inclusionist-engine/docs/2-Architecture/adr/`.
+>
+> **What changes, task by task.** Roughly half of Phase 1 already exists in the engine repository, tested:
+>
+> | Tasks | What they are | What to do instead |
+> |---|---|---|
+> | 2, 3, 4, 5, 6, 7, 9, 11, 19, 20 | leaf modules, collision, i18n, screen reader, input, canvas + PixiJS mount, CVD/low-vision filters, HUD/pause/audio, PWA + a11y gate + CI, settings | **Do not rewrite.** They exist in `@pm-monte/inclusionist-engine` and are covered by 2 099 passing tests. Consume them. |
+> | 8 | high contrast by sprite ROLE, and the `Scene` | **Keep as a rewrite.** Spec D9 is a deliberate redesign: the engine's 534 lines are welded to The Inclusionist's own entity taxonomy. |
+> | 10, 12, 13 | accessible shell + router, the public `game-api`, session + composition root | **Keep.** This is the shell of ADR-0036, and it genuinely does not exist anywhere. |
+> | 14, 15, 16 | Snake, Pong, Breakout | **Keep.** They are the only honest test that the engine works outside its first genre. |
+> | 17, 18 | catalog into data, generated catalog page | **Keep.** |
+>
+> **One conflict must be resolved before any of this compiles.** Spec D13 forbids module-level mutable state
+> in the engine. The engine's `core/state.ts` is exactly that: 26 `export let` read through live bindings by
+> twelve modules. It also mixes two kinds of state that must not share a home — PAGE-scoped (accessibility
+> settings, language, audio: correctly global, because a blind child must not reconfigure per game) and
+> RUN-scoped (`phase`, `players`, `gateTiles`, `ended`: never global in a shell that loads game after game).
+> Cutting page × run in the engine is a prerequisite of "consume the engine", and it is the next ADR.
+>
+> Rewrite this plan against the table above before executing it. This banner comes out with the rewrite.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the engine, accessible shell and catalog generator that all 383 games inherit, proven by three reference games (Snake, Pong, Breakout).
