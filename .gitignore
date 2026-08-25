@@ -17,3 +17,6 @@ TODO.local.md
 .vscode/
 .DS_Store
 Thumbs.db
+
+# SDD scratch (ledger, briefs, review packages) — never versioned
+.superpowers/

@@ -3224,7 +3224,8 @@ Replace the Task 1 placeholder entirely:
   </div>
 </main>
 
-<script type="module" src="./engine/shell/boot.ts"></script>
+<!-- The module tag arrives in Task 13, with boot.ts. Vite resolves script sources in an HTML entry, so
+     pointing at a file that does not exist yet breaks this task's own browser test. -->
 </body>
 </html>
 ```
@@ -4537,8 +4538,9 @@ import { createHud } from './hud.js';
 import { createPause } from './pause.js';
 import { loaderFor, parseHash } from './router.js';
 import { startSession, type Session } from './session.js';
-import { mountSettings } from './settings.js';
 import type { GameModule } from '../game-api.js';
+// NOTE: settings.ts arrives in Task 20, which adds its import and its two call sites here. Importing it
+// now would not compile.
 
 export async function startShell(): Promise<void> {
   const region = $<HTMLElement>('#game-region');
@@ -4592,14 +4594,13 @@ export async function startShell(): Promise<void> {
     });
   });
 
-  mountSettings({ root: document, i18n, visual, viz });
+  // Task 20 mounts the accessibility settings here.
 
   // Canvas text is invisible to applyDom, which only walks [data-i18n] in the DOM. Restarting the game
   // is the blunt way to redraw it, and it means the discipline lives here instead of in 383 games.
   i18n.onChange(() => {
     i18n.applyDom(document);
-    mountSettings({ root: document, i18n, visual, viz });
-    session?.restart();
+    session?.restart();   // Task 20 also re-mounts the settings here
   });
 
   // Reloading on hash change is cruder than swapping games in place, and correct: a torn-down game
@@ -4626,13 +4627,20 @@ export async function startShell(): Promise<void> {
 if (typeof document !== 'undefined' && document.querySelector('#game-region')) void startShell();
 ```
 
-- [ ] **Step 8: Typecheck, run everything and commit**
+- [ ] **Step 8: Add the module tag to `play.html`**
+
+Task 10 left a comment where this goes, just before `</body>`:
+```html
+<script type="module" src="./engine/shell/boot.ts"></script>
+```
+
+- [ ] **Step 9: Typecheck, run everything and commit**
 
 Run: `npx tsc --noEmit && npm run lint:deps && npm run format:check`
 Expected: no output from any of the three.
 
 ```bash
-git add engine/shell/session.ts engine/shell/session.browser.test.ts engine/shell/boot.ts engine/shell/boot.browser.test.ts
+git add engine/shell/session.ts engine/shell/session.browser.test.ts engine/shell/boot.ts engine/shell/boot.browser.test.ts play.html
 git commit -m "feat: split the composition root from the game session
 
 boot composes and creates every instance; session runs one game's lifetime.
@@ -7095,7 +7103,23 @@ export function mountSettings({ root, i18n, visual, viz }: SettingsDeps): void {
 > parameter the audit removed from `initViz` — and `noUnusedParameters` does not catch a destructured
 > field, so only reading the body catches it.
 
-- [ ] **Step 5: Run the test, the full suite and the checks**
+- [ ] **Step 5: Wire it into `boot.ts`**
+
+Task 13 left two marked places for this. Add the import:
+```ts
+import { mountSettings } from './settings.js';
+```
+Call it once after `mountSettings` is available, replacing the `// Task 20 mounts...` comment:
+```ts
+  mountSettings({ root: document, i18n, visual, viz });
+```
+And re-mount on a language change, so the language select does not keep showing the previous choice —
+inside the existing `i18n.onChange` handler, before `session?.restart()`:
+```ts
+    mountSettings({ root: document, i18n, visual, viz });
+```
+
+- [ ] **Step 6: Run the test, the full suite and the checks**
 
 Run: `npx vitest run --project browser engine/shell/settings.browser.test.ts`
 Expected: PASS, 13 tests.
@@ -7103,7 +7127,7 @@ Expected: PASS, 13 tests.
 Run: `npx tsc --noEmit && npx vitest run && npm run lint:deps && npm run format:check`
 Expected: all clean.
 
-- [ ] **Step 6: Verify by hand, with the keyboard only**
+- [ ] **Step 7: Verify by hand, with the keyboard only**
 
 Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/breakout`.
 
@@ -7115,12 +7139,12 @@ Using **no mouse at all**:
 - Choose English — the pause labels and the game's own announcements must both change.
 - `Escape` to resume; the game continues with the new settings.
 
-- [ ] **Step 7: Re-run the accessibility gate**
+- [ ] **Step 8: Re-run the accessibility gate**
 
 Run the gate as in Task 19. A `<select>` without an associated label is the likeliest new violation; if
 it appears, fix the `for`/`id` pairing rather than excluding the element.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add play.html engine/shell/shell.css engine/shell/settings.ts engine/shell/settings.browser.test.ts engine/shell/boot.ts
