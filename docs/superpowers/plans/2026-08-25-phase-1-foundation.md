@@ -4061,3 +4061,865 @@ calls."
 ```
 
 ---
+
+### Task 14: Pong — two-player input
+
+**Files:**
+- Create: `games/arcade-classico/pong/rules.ts`, `games/arcade-classico/pong/strings.ts`, `games/arcade-classico/pong/main.ts`
+- Test: `games/arcade-classico/pong/rules.test.ts`
+
+**Interfaces:**
+- Consumes: `GameContext`, `GameMeta` from Task 12; `LOGICAL_W`, `LOGICAL_H` from Task 1.
+- Produces: nothing other tasks consume. Its job is to prove `players: 2` works end to end — two independent key schemes driving two paddles from one `InputApi`.
+
+> Pong is here for the input layer, not the game. Snake never touches `held` (it turns on edges) and
+> never uses a second player. If `attachInput` had the two schemes crossed, Snake would pass and every
+> two-player game in the collection would be broken.
+
+- [ ] **Step 1: Write the failing rules test**
+
+`games/arcade-classico/pong/rules.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { advance, createPong, movePaddle, WIN_SCORE, type PongState } from './rules.js';
+
+const fresh = (): PongState => createPong(320, 176);
+
+describe('createPong', () => {
+  it('starts level, scoreless and with the ball moving', () => {
+    const s = fresh();
+    expect(s.score).toEqual([0, 0]);
+    expect(s.ball.vx).not.toBe(0);
+    expect(s.winner).toBeNull();
+  });
+
+  it('centres both paddles', () => {
+    const s = fresh();
+    expect(s.paddles[0]!.y).toBe(s.paddles[1]!.y);
+  });
+});
+
+describe('movePaddle', () => {
+  it('moves a paddle by the step given', () => {
+    const s = fresh();
+    const before = s.paddles[0]!.y;
+    movePaddle(s, 0, 1, 1);
+    expect(s.paddles[0]!.y).toBeGreaterThan(before);
+  });
+
+  it('scales the step by dt, so a slow frame does not slow the paddle', () => {
+    const a = fresh(); const b = fresh();
+    movePaddle(a, 0, 1, 1);
+    movePaddle(b, 0, 1, 2);
+    expect(b.paddles[0]!.y - a.paddles[0]!.y).toBeCloseTo(a.paddles[0]!.y - fresh().paddles[0]!.y, 6);
+  });
+
+  it('clamps at the top and bottom rather than leaving the field', () => {
+    const s = fresh();
+    movePaddle(s, 0, -1, 1000);
+    expect(s.paddles[0]!.y).toBe(0);
+    movePaddle(s, 0, 1, 1000);
+    expect(s.paddles[0]!.y).toBe(s.h - s.paddleH);
+  });
+
+  it('moves only the paddle asked for', () => {
+    const s = fresh();
+    const other = s.paddles[1]!.y;
+    movePaddle(s, 0, 1, 5);
+    expect(s.paddles[1]!.y).toBe(other);
+  });
+});
+
+describe('advance', () => {
+  it('moves the ball by its velocity, scaled by dt', () => {
+    const s = fresh();
+    const x0 = s.ball.x;
+    advance(s, 1);
+    const d1 = s.ball.x - x0;
+    const t = fresh();
+    advance(t, 2);
+    expect(t.ball.x - x0).toBeCloseTo(d1 * 2, 6);
+  });
+
+  it('bounces off the top edge and ends up inside the field', () => {
+    const s = fresh();
+    s.ball.y = 1; s.ball.vy = -4;
+    advance(s, 1);
+    expect(s.ball.vy).toBeGreaterThan(0);
+    expect(s.ball.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it('bounces off the bottom edge', () => {
+    const s = fresh();
+    s.ball.y = s.h - 1; s.ball.vy = 4;
+    advance(s, 1);
+    expect(s.ball.vy).toBeLessThan(0);
+    expect(s.ball.y).toBeLessThanOrEqual(s.h - s.ball.size);
+  });
+
+  it('scores for the right player when the ball leaves on the left', () => {
+    const s = fresh();
+    s.ball.x = 1; s.ball.vx = -6;
+    const scored = advance(s, 1);
+    expect(s.score).toEqual([0, 1]);
+    expect(scored).toBe(1);
+  });
+
+  it('scores for the left player when the ball leaves on the right', () => {
+    const s = fresh();
+    s.ball.x = s.w - 1; s.ball.vx = 6;
+    expect(advance(s, 1)).toBe(0);
+    expect(s.score).toEqual([1, 0]);
+  });
+
+  it('re-serves towards the player who was just scored on', () => {
+    const s = fresh();
+    s.ball.x = 1; s.ball.vx = -6;
+    advance(s, 1);
+    expect(s.ball.vx).toBeLessThan(0);
+  });
+
+  it('bounces off a paddle and reverses direction', () => {
+    const s = fresh();
+    s.paddles[0]!.y = 40;
+    s.ball.x = s.paddleW + 1;
+    s.ball.y = 44;
+    s.ball.vx = -4; s.ball.vy = 0;
+    advance(s, 1);
+    expect(s.ball.vx).toBeGreaterThan(0);
+  });
+
+  it('deflects up off the top of a paddle and down off the bottom', () => {
+    const up = fresh();
+    up.paddles[0]!.y = 40;
+    up.ball.x = up.paddleW + 1; up.ball.y = 41; up.ball.vx = -4; up.ball.vy = 0;
+    advance(up, 1);
+    expect(up.ball.vy).toBeLessThan(0);
+
+    const down = fresh();
+    down.paddles[0]!.y = 40;
+    down.ball.x = down.paddleW + 1;
+    down.ball.y = 40 + down.paddleH - 1;
+    down.ball.vx = -4; down.ball.vy = 0;
+    advance(down, 1);
+    expect(down.ball.vy).toBeGreaterThan(0);
+  });
+
+  it('declares a winner at the winning score and then freezes', () => {
+    const s = fresh();
+    s.score = [WIN_SCORE - 1, 0];
+    s.ball.x = s.w - 1; s.ball.vx = 6;
+    advance(s, 1);
+    expect(s.winner).toBe(0);
+    const frozen = JSON.stringify(s);
+    advance(s, 1);
+    expect(JSON.stringify(s)).toBe(frozen);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project node games/arcade-classico/pong`
+Expected: FAIL — `Failed to resolve import "./rules.js"`.
+
+- [ ] **Step 3: Write `games/arcade-classico/pong/rules.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Pong rules. Pure: no PixiJS, no DOM, no engine imports.
+export interface Paddle { y: number }
+export interface Ball { x: number; y: number; vx: number; vy: number; size: number }
+
+export interface PongState {
+  w: number; h: number;
+  paddleW: number; paddleH: number; paddleSpeed: number;
+  paddles: [Paddle, Paddle];
+  ball: Ball;
+  score: [number, number];
+  winner: 0 | 1 | null;
+}
+
+export const WIN_SCORE = 5;
+
+const BALL_SPEED = 2.2;
+
+export function createPong(w: number, h: number): PongState {
+  const paddleH = 32;
+  return {
+    w, h,
+    paddleW: 4, paddleH, paddleSpeed: 2.4,
+    paddles: [{ y: (h - paddleH) / 2 }, { y: (h - paddleH) / 2 }],
+    ball: { x: w / 2, y: h / 2, vx: BALL_SPEED, vy: BALL_SPEED * 0.4, size: 4 },
+    score: [0, 0],
+    winner: null,
+  };
+}
+
+/** Move one paddle. `dir` is -1, 0 or 1; `dt` is in FRAMES. Clamped to the field. */
+export function movePaddle(s: PongState, i: 0 | 1, dir: number, dt: number): void {
+  const p = s.paddles[i]!;
+  p.y = Math.max(0, Math.min(s.h - s.paddleH, p.y + dir * s.paddleSpeed * dt));
+}
+
+function serve(s: PongState, towards: -1 | 1): void {
+  s.ball.x = s.w / 2;
+  s.ball.y = s.h / 2;
+  s.ball.vx = BALL_SPEED * towards;
+  s.ball.vy = BALL_SPEED * 0.4;
+}
+
+/**
+ * Advance one frame. Returns the index of the player who just scored, or null.
+ *
+ * Paddle contact is an overlap test rather than a swept one: the ball is slow relative to its own
+ * size here, and the paddle is a wall the full height of its span, so there is nothing to tunnel
+ * through. Breakout, whose ball is fast and whose bricks are thin, uses the swept test instead.
+ */
+export function advance(s: PongState, dt: number): 0 | 1 | null {
+  if (s.winner !== null) return null;
+
+  s.ball.x += s.ball.vx * dt;
+  s.ball.y += s.ball.vy * dt;
+
+  if (s.ball.y <= 0) { s.ball.y = 0; s.ball.vy = Math.abs(s.ball.vy); }
+  if (s.ball.y + s.ball.size >= s.h) { s.ball.y = s.h - s.ball.size; s.ball.vy = -Math.abs(s.ball.vy); }
+
+  for (const i of [0, 1] as const) {
+    const px = i === 0 ? 0 : s.w - s.paddleW;
+    const p = s.paddles[i]!;
+    const hitX = s.ball.x <= px + s.paddleW && s.ball.x + s.ball.size >= px;
+    const hitY = s.ball.y + s.ball.size >= p.y && s.ball.y <= p.y + s.paddleH;
+    const movingInto = i === 0 ? s.ball.vx < 0 : s.ball.vx > 0;
+    if (hitX && hitY && movingInto) {
+      s.ball.vx = -s.ball.vx;
+      // Where on the paddle it landed steers the return: -1 at the top edge, +1 at the bottom. This
+      // is what makes Pong a game rather than a demo — without it every rally is identical.
+      const rel = (s.ball.y + s.ball.size / 2 - p.y) / s.paddleH;
+      s.ball.vy = (rel - 0.5) * 2 * BALL_SPEED;
+      s.ball.x = i === 0 ? px + s.paddleW : px - s.ball.size;
+    }
+  }
+
+  if (s.ball.x + s.ball.size < 0) {
+    s.score[1]++;
+    if (s.score[1] >= WIN_SCORE) { s.winner = 1; return 1; }
+    serve(s, -1);   // serve back towards the player who conceded
+    return 1;
+  }
+  if (s.ball.x > s.w) {
+    s.score[0]++;
+    if (s.score[0] >= WIN_SCORE) { s.winner = 0; return 0; }
+    serve(s, 1);
+    return 0;
+  }
+  return null;
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run --project node games/arcade-classico/pong`
+Expected: PASS, 15 tests.
+
+- [ ] **Step 5: Write `games/arcade-classico/pong/strings.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import type { GameStrings } from '../../../engine/core/i18n.js';
+
+export const strings: GameStrings = {
+  pt: {
+    title: 'Pong',
+    start: 'Jogador 1: W e S. Jogador 2: seta para cima e seta para baixo.',
+    point: 'Ponto do jogador {who}. {a} a {b}.',
+    gameOver: 'Jogador {who} venceu por {a} a {b}.',
+  },
+  en: {
+    title: 'Pong',
+    start: 'Player 1: W and S. Player 2: up arrow and down arrow.',
+    point: 'Point for player {who}. {a} to {b}.',
+    gameOver: 'Player {who} won {a} to {b}.',
+  },
+  es: {
+    title: 'Pong',
+    start: 'Jugador 1: W y S. Jugador 2: flecha arriba y flecha abajo.',
+    point: 'Punto para el jugador {who}. {a} a {b}.',
+    gameOver: 'El jugador {who} ganó {a} a {b}.',
+  },
+};
+```
+
+- [ ] **Step 6: Write `games/arcade-classico/pong/main.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Pong. Two players from one InputApi: paddle 0 reads player 0's scheme, paddle 1 reads player 1's.
+// Movement uses `held`, not `pressed` — a paddle must keep moving while the key is down.
+import type { Sprite } from 'pixi.js';
+import type { GameContext, GameMeta } from '../../../engine/shell/boot.js';
+import { LOGICAL_H, LOGICAL_W } from '../../../engine/core/constants.js';
+import { advance, createPong, movePaddle, type PongState } from './rules.js';
+import { strings } from './strings.js';
+
+export { strings };
+
+export const meta: GameMeta = {
+  slug: 'pong',
+  title: 'Pong',
+  category: 'arcade-classico',
+  density: 'leve',
+  players: 2,
+};
+
+const FIELD_H = 176;
+const TOP = Math.floor((LOGICAL_H - FIELD_H) / 2);
+
+let ctx: GameContext;
+let state: PongState;
+let paddles: [Sprite, Sprite] | null = null;
+let ball: Sprite | null = null;
+let done = false;
+
+export function setup(c: GameContext): void {
+  ctx = c;
+  done = false;
+  state = createPong(LOGICAL_W, FIELD_H);
+
+  // Both paddles are 'player': to a player using high contrast, both are things a person controls.
+  // Tagging one of them 'hazard' would be a lie about what the colour means everywhere else.
+  const mk = (w: number, h: number, role: 'player' | 'pickup', col: string): Sprite =>
+    ctx.sprites.make({ role, w, h, paint: (px) => px(0, 0, w, h, col) });
+
+  paddles = [
+    mk(state.paddleW, state.paddleH, 'player', '#00d9ff'),
+    mk(state.paddleW, state.paddleH, 'player', '#ff2d8e'),
+  ];
+  ball = mk(state.ball.size, state.ball.size, 'pickup', '#ececf2');
+
+  for (const s of [...paddles, ball]) ctx.stage.addChild(s);
+  paddles[0].x = 0;
+  paddles[1].x = LOGICAL_W - state.paddleW;
+
+  render();
+  ctx.srSay(ctx.t('start'));
+}
+
+function render(): void {
+  if (!paddles || !ball) return;
+  paddles[0].y = TOP + state.paddles[0].y;
+  paddles[1].y = TOP + state.paddles[1].y;
+  ball.x = state.ball.x;
+  ball.y = TOP + state.ball.y;
+}
+
+export function update(dt: number): void {
+  if (done) return;
+
+  for (const i of [0, 1] as const) {
+    const dir = (ctx.input.held(i, 'down') ? 1 : 0) - (ctx.input.held(i, 'up') ? 1 : 0);
+    if (dir !== 0) movePaddle(state, i, dir, dt);
+  }
+
+  const scorer = advance(state, dt);
+  render();
+
+  if (scorer === null) return;
+
+  ctx.audio.beep(scorer === 0 ? 660 : 440, 60);
+  const params = { who: scorer + 1, a: state.score[0], b: state.score[1] };
+  if (state.winner === null) {
+    ctx.srSay(ctx.t('point', params));
+  } else {
+    done = true;
+    ctx.srAlert(ctx.t('gameOver', params));
+    ctx.onGameOver(Math.max(state.score[0], state.score[1]));
+  }
+}
+
+export function teardown(): void {
+  for (const s of [...(paddles ?? []), ball]) if (s) ctx.stage.removeChild(s);
+  paddles = null;
+  ball = null;
+}
+```
+
+- [ ] **Step 7: Run the whole suite and typecheck**
+
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: no typecheck output; every test passes.
+
+- [ ] **Step 8: See it run and confirm the two schemes are not crossed**
+
+Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/pong`.
+
+- W and S must move the LEFT paddle only; the up and down arrows the RIGHT paddle only.
+- Pressing both at once must move both, independently.
+- A ball hitting the top of a paddle must come off upwards, and the bottom downwards.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add games/arcade-classico/pong/
+git commit -m "feat: add Pong, proving two-player input
+
+Snake never uses held() and never uses a second scheme, so crossed player
+bindings would have passed unnoticed until every two-player game in the
+collection was broken."
+```
+
+---
+
+### Task 15: Breakout — swept collision and FX
+
+**Files:**
+- Create: `games/arcade-classico/breakout/rules.ts`, `games/arcade-classico/breakout/strings.ts`, `games/arcade-classico/breakout/main.ts`
+- Test: `games/arcade-classico/breakout/rules.test.ts`
+
+**Interfaces:**
+- Consumes: `sweptAabb`, `type Box` from Task 3; `GameContext`, `GameMeta` from Task 12.
+- Produces: nothing other tasks consume. It is the case that proves the swept collision primitive is actually load-bearing.
+
+> Breakout is the third reference game because it is the one that breaks if `sweptAabb` is wrong. Its
+> ball crosses several times a brick's thickness per frame, so an overlap-only engine lets it fly
+> through the wall. This is the task that turns Task 3 from a plausible-looking function into a tested
+> claim.
+
+- [ ] **Step 1: Write the failing rules test**
+
+`games/arcade-classico/breakout/rules.test.ts`:
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { describe, expect, it } from 'vitest';
+import { advance, createBreakout, movePaddle, type BreakoutState } from './rules.js';
+
+const fresh = (): BreakoutState => createBreakout(320, 176);
+
+describe('createBreakout', () => {
+  it('starts with a full wall, three lives and no score', () => {
+    const s = fresh();
+    expect(s.bricks.length).toBeGreaterThan(0);
+    expect(s.bricks.every((b) => b.alive)).toBe(true);
+    expect(s.lives).toBe(3);
+    expect(s.score).toBe(0);
+  });
+
+  it('lays every brick inside the field', () => {
+    const s = fresh();
+    for (const b of s.bricks) {
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.w).toBeLessThanOrEqual(s.w);
+      expect(b.y).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe('movePaddle', () => {
+  it('clamps the paddle inside the field', () => {
+    const s = fresh();
+    movePaddle(s, -1, 1000);
+    expect(s.paddle.x).toBe(0);
+    movePaddle(s, 1, 1000);
+    expect(s.paddle.x).toBe(s.w - s.paddle.w);
+  });
+});
+
+describe('advance', () => {
+  it('bounces off the left and right walls', () => {
+    const left = fresh();
+    left.ball.x = 0; left.ball.vx = -3;
+    advance(left, 1);
+    expect(left.ball.vx).toBeGreaterThan(0);
+
+    const right = fresh();
+    right.ball.x = right.w - right.ball.size; right.ball.vx = 3;
+    advance(right, 1);
+    expect(right.ball.vx).toBeLessThan(0);
+  });
+
+  it('bounces off the ceiling', () => {
+    const s = fresh();
+    s.ball.y = 0; s.ball.vy = -3;
+    advance(s, 1);
+    expect(s.ball.vy).toBeGreaterThan(0);
+  });
+
+  it('destroys a brick it hits and scores for it', () => {
+    const s = fresh();
+    const brick = s.bricks[0]!;
+    s.ball.x = brick.x + brick.w / 2;
+    s.ball.y = brick.y + brick.h + 1;
+    s.ball.vx = 0; s.ball.vy = -3;
+    advance(s, 1);
+    expect(brick.alive).toBe(false);
+    expect(s.score).toBe(1);
+  });
+
+  it('reverses the ball on the axis of the face it struck', () => {
+    const s = fresh();
+    const brick = s.bricks[0]!;
+    s.ball.x = brick.x + brick.w / 2;
+    s.ball.y = brick.y + brick.h + 1;
+    s.ball.vx = 0; s.ball.vy = -3;
+    advance(s, 1);
+    expect(s.ball.vy).toBeGreaterThan(0);
+  });
+
+  it('does not tunnel through the wall at high speed', () => {
+    const s = fresh();
+    const brick = s.bricks[0]!;
+    s.ball.x = brick.x + brick.w / 2;
+    s.ball.y = brick.y + brick.h + 2;
+    s.ball.vx = 0;
+    s.ball.vy = -200;             // far past the brick in a single frame
+    advance(s, 1);
+    expect(brick.alive).toBe(false);
+  });
+
+  it('breaks at most one brick per frame, so one shot is one point', () => {
+    const s = fresh();
+    s.ball.x = s.bricks[0]!.x + 1;
+    s.ball.y = s.h / 2;
+    s.ball.vx = 0; s.ball.vy = -400;
+    advance(s, 1);
+    expect(s.bricks.filter((b) => !b.alive).length).toBe(1);
+  });
+
+  it('loses a life when the ball falls past the floor', () => {
+    const s = fresh();
+    s.ball.y = s.h + 1; s.ball.vy = 3;
+    advance(s, 1);
+    expect(s.lives).toBe(2);
+  });
+
+  it('ends the game when the last life is gone', () => {
+    const s = fresh();
+    s.lives = 1;
+    s.ball.y = s.h + 1; s.ball.vy = 3;
+    advance(s, 1);
+    expect(s.over).toBe(true);
+  });
+
+  it('bounces off the paddle and steers by where it landed', () => {
+    const s = fresh();
+    s.paddle.x = 100;
+    s.ball.x = 100 + 2;                        // near the left end of the paddle
+    s.ball.y = s.paddle.y - s.ball.size;
+    s.ball.vx = 0; s.ball.vy = 3;
+    advance(s, 1);
+    expect(s.ball.vy).toBeLessThan(0);
+    expect(s.ball.vx).toBeLessThan(0);
+  });
+
+  it('is won when the last brick falls', () => {
+    const s = fresh();
+    for (const b of s.bricks) b.alive = false;
+    s.bricks[0]!.alive = true;
+    const brick = s.bricks[0]!;
+    s.ball.x = brick.x + brick.w / 2;
+    s.ball.y = brick.y + brick.h + 1;
+    s.ball.vx = 0; s.ball.vy = -3;
+    advance(s, 1);
+    expect(s.won).toBe(true);
+  });
+
+  it('freezes once over', () => {
+    const s = fresh();
+    s.over = true;
+    const frozen = JSON.stringify(s);
+    advance(s, 1);
+    expect(JSON.stringify(s)).toBe(frozen);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run --project node games/arcade-classico/breakout`
+Expected: FAIL — `Failed to resolve import "./rules.js"`.
+
+- [ ] **Step 3: Write `games/arcade-classico/breakout/rules.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Breakout rules. Pure apart from the engine's collision primitive, which is itself pure.
+import { sweptAabb, type Box } from '../../../engine/core/collision.js';
+
+export interface Brick extends Box { alive: boolean }
+export interface Ball { x: number; y: number; vx: number; vy: number; size: number }
+
+export interface BreakoutState {
+  w: number; h: number;
+  paddle: Box;
+  ball: Ball;
+  bricks: Brick[];
+  score: number;
+  lives: number;
+  over: boolean;
+  won: boolean;
+}
+
+const COLS = 10, ROWS = 4, BRICK_H = 8, GAP = 2, TOP = 16;
+const PADDLE_SPEED = 3.2;
+
+export function createBreakout(w: number, h: number): BreakoutState {
+  const brickW = Math.floor((w - GAP * (COLS + 1)) / COLS);
+  const bricks: Brick[] = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      bricks.push({
+        x: GAP + c * (brickW + GAP),
+        y: TOP + r * (BRICK_H + GAP),
+        w: brickW, h: BRICK_H, alive: true,
+      });
+    }
+  }
+  return {
+    w, h,
+    paddle: { x: w / 2 - 20, y: h - 10, w: 40, h: 4 },
+    ball: { x: w / 2, y: h / 2, vx: 1.8, vy: 2.4, size: 4 },
+    bricks,
+    score: 0, lives: 3, over: false, won: false,
+  };
+}
+
+export function movePaddle(s: BreakoutState, dir: number, dt: number): void {
+  s.paddle.x = Math.max(0, Math.min(s.w - s.paddle.w, s.paddle.x + dir * PADDLE_SPEED * dt));
+}
+
+function resetBall(s: BreakoutState): void {
+  s.ball.x = s.w / 2;
+  s.ball.y = s.h / 2;
+  s.ball.vx = 1.8;
+  s.ball.vy = 2.4;
+}
+
+/**
+ * Advance one frame. Returns 'brick', 'paddle', 'wall', 'life' or null, so the caller knows which
+ * sound to make without re-deriving what happened.
+ *
+ * The brick pass is SWEPT, not an overlap test. At full speed the ball travels several times a
+ * brick's thickness in one frame, and an overlap test would find it already past the wall with
+ * nothing to report. Only the EARLIEST hit is resolved: breaking a whole column in one frame because
+ * the path crossed four bricks would turn one shot into four points.
+ */
+export function advance(s: BreakoutState, dt: number): 'brick' | 'paddle' | 'wall' | 'life' | null {
+  if (s.over || s.won) return null;
+
+  const vx = s.ball.vx * dt, vy = s.ball.vy * dt;
+  const box: Box = { x: s.ball.x, y: s.ball.y, w: s.ball.size, h: s.ball.size };
+
+  let first: { t: number; nx: number; ny: number; brick: Brick } | null = null;
+  for (const b of s.bricks) {
+    if (!b.alive) continue;
+    const hit = sweptAabb(box, vx, vy, b);
+    if (hit && (first === null || hit.t < first.t)) first = { ...hit, brick: b };
+  }
+
+  if (first) {
+    s.ball.x += vx * first.t;
+    s.ball.y += vy * first.t;
+    if (first.nx !== 0) s.ball.vx = -s.ball.vx;
+    if (first.ny !== 0) s.ball.vy = -s.ball.vy;
+    first.brick.alive = false;
+    s.score++;
+    if (s.bricks.every((b) => !b.alive)) s.won = true;
+    return 'brick';
+  }
+
+  s.ball.x += vx;
+  s.ball.y += vy;
+
+  let bounced = false;
+  if (s.ball.x <= 0) { s.ball.x = 0; s.ball.vx = Math.abs(s.ball.vx); bounced = true; }
+  if (s.ball.x + s.ball.size >= s.w) { s.ball.x = s.w - s.ball.size; s.ball.vx = -Math.abs(s.ball.vx); bounced = true; }
+  if (s.ball.y <= 0) { s.ball.y = 0; s.ball.vy = Math.abs(s.ball.vy); bounced = true; }
+
+  const p = s.paddle;
+  const onPaddle = s.ball.vy > 0
+    && s.ball.y + s.ball.size >= p.y && s.ball.y <= p.y + p.h
+    && s.ball.x + s.ball.size >= p.x && s.ball.x <= p.x + p.w;
+  if (onPaddle) {
+    s.ball.y = p.y - s.ball.size;
+    s.ball.vy = -Math.abs(s.ball.vy);
+    // Where it landed steers the return, same idea as Pong: the paddle is an aiming tool, not a wall.
+    const rel = (s.ball.x + s.ball.size / 2 - p.x) / p.w;
+    s.ball.vx = (rel - 0.5) * 2 * 3;
+    return 'paddle';
+  }
+
+  if (s.ball.y > s.h) {
+    s.lives--;
+    if (s.lives <= 0) { s.lives = 0; s.over = true; }
+    else resetBall(s);
+    return 'life';
+  }
+
+  return bounced ? 'wall' : null;
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `npx vitest run --project node games/arcade-classico/breakout`
+Expected: PASS, 14 tests — including the tunnelling case, which is the point of the task.
+
+- [ ] **Step 5: Write `games/arcade-classico/breakout/strings.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+import type { GameStrings } from '../../../engine/core/i18n.js';
+
+export const strings: GameStrings = {
+  pt: {
+    title: 'Breakout',
+    start: 'Use as setas ou A e D para mover a raquete.',
+    life: 'Você perdeu uma bola. Restam {lives}.',
+    won: 'Parede destruída. {score} tijolos.',
+    gameOver: 'Fim de jogo. {score} tijolos.',
+  },
+  en: {
+    title: 'Breakout',
+    start: 'Use the arrows or A and D to move the paddle.',
+    life: 'You lost a ball. {lives} left.',
+    won: 'Wall cleared. {score} bricks.',
+    gameOver: 'Game over. {score} bricks.',
+  },
+  es: {
+    title: 'Breakout',
+    start: 'Usa las flechas o A y D para mover la paleta.',
+    life: 'Perdiste una bola. Quedan {lives}.',
+    won: 'Muro destruido. {score} ladrillos.',
+    gameOver: 'Fin del juego. {score} ladrillos.',
+  },
+};
+```
+
+- [ ] **Step 6: Write `games/arcade-classico/breakout/main.ts`**
+
+```ts
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Breakout. The role tags earn their keep here: bricks are 'goal' (what you are trying to remove),
+// the paddle is 'player', the ball is 'pickup'. In high contrast those three become three provably
+// distinct colours, which matters more in this game than in the other two — a player who cannot
+// separate ball from brick cannot play it at all.
+import type { Sprite } from 'pixi.js';
+import type { GameContext, GameMeta } from '../../../engine/shell/boot.js';
+import { LOGICAL_H, LOGICAL_W } from '../../../engine/core/constants.js';
+import { advance, createBreakout, movePaddle, type BreakoutState } from './rules.js';
+import { strings } from './strings.js';
+
+export { strings };
+
+export const meta: GameMeta = {
+  slug: 'breakout',
+  title: 'Breakout',
+  category: 'arcade-classico',
+  density: 'leve',
+  players: 1,
+};
+
+const FIELD_H = 176;
+const TOP = Math.floor((LOGICAL_H - FIELD_H) / 2);
+
+let ctx: GameContext;
+let state: BreakoutState;
+let brickSprites: Sprite[] = [];
+let paddle: Sprite | null = null;
+let ball: Sprite | null = null;
+let finished = false;
+
+export function setup(c: GameContext): void {
+  ctx = c;
+  finished = false;
+  state = createBreakout(LOGICAL_W, FIELD_H);
+
+  const mk = (w: number, h: number, role: 'player' | 'pickup' | 'goal', col: string): Sprite =>
+    ctx.sprites.make({ role, w, h, paint: (px) => px(0, 0, w, h, col) });
+
+  brickSprites = state.bricks.map((b, i) => {
+    const s = mk(b.w, b.h, 'goal', ['#ff2d8e', '#ffd60a', '#00d9ff', '#b8ff3d'][i % 4]!);
+    s.x = b.x;
+    s.y = TOP + b.y;
+    ctx.stage.addChild(s);
+    return s;
+  });
+
+  paddle = mk(state.paddle.w, state.paddle.h, 'player', '#ececf2');
+  ball = mk(state.ball.size, state.ball.size, 'pickup', '#ffffff');
+  ctx.stage.addChild(paddle);
+  ctx.stage.addChild(ball);
+
+  render();
+  ctx.srSay(ctx.t('start'));
+}
+
+function render(): void {
+  state.bricks.forEach((b, i) => { brickSprites[i]!.visible = b.alive; });
+  if (paddle) { paddle.x = state.paddle.x; paddle.y = TOP + state.paddle.y; }
+  if (ball) { ball.x = state.ball.x; ball.y = TOP + state.ball.y; }
+}
+
+export function update(dt: number): void {
+  if (finished) return;
+
+  const dir = (ctx.input.held(0, 'right') ? 1 : 0) - (ctx.input.held(0, 'left') ? 1 : 0);
+  if (dir !== 0) movePaddle(state, dir, dt);
+
+  const event = advance(state, dt);
+  render();
+
+  if (event === 'brick') { ctx.audio.beep(660, 30); }
+  if (event === 'paddle') { ctx.audio.beep(440, 30); }
+  if (event === 'wall') { ctx.audio.beep(330, 20); }
+  if (event === 'life' && !state.over) { ctx.audio.beep(180, 120); ctx.srSay(ctx.t('life', { lives: state.lives })); }
+
+  if (state.won) {
+    finished = true;
+    ctx.srAlert(ctx.t('won', { score: state.score }));
+    ctx.onGameOver(state.score);
+  } else if (state.over) {
+    finished = true;
+    ctx.audio.beep(110, 240);
+    ctx.srAlert(ctx.t('gameOver', { score: state.score }));
+    ctx.onGameOver(state.score);
+  }
+}
+
+export function teardown(): void {
+  for (const s of brickSprites) ctx.stage.removeChild(s);
+  if (paddle) ctx.stage.removeChild(paddle);
+  if (ball) ctx.stage.removeChild(ball);
+  brickSprites = [];
+  paddle = null;
+  ball = null;
+}
+```
+
+- [ ] **Step 7: Run the whole suite and typecheck**
+
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: no typecheck output; every test passes.
+
+- [ ] **Step 8: See it run**
+
+Run: `npm run build && npm run preview`, open `http://localhost:4173/play.html#arcade-classico/breakout`.
+
+- The ball must never pass through a brick, however fast it is moving.
+- Exactly one brick disappears per contact.
+- `__demos.contrast.set(7)` in the console must leave the paddle, the ball and the bricks visibly
+  different from one another — that is the whole promise of the role tags.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add games/arcade-classico/breakout/
+git commit -m "feat: add Breakout, exercising the swept collision
+
+Its ball crosses several brick-thicknesses per frame, so this is the game that
+would tunnel if sweptAabb were wrong. Only the earliest hit resolves, or one
+shot down a column would score four."
+```
+
+---
