@@ -36,10 +36,19 @@ the manifest handles this with `aliasOf` instead of duplicating an implementatio
 | D10 | **One i18n dictionary per game**, shipped with the game's chunk | One flat dictionary per locale, as the tracer does it |
 | D11 | PWA precaches the shell and catalog only; game chunks are runtime-cached on demand | Precache everything, as the tracer does it |
 | D12 | axe gate in CI over the DOM shell, with its blind spots stated | No gate; or claiming WCAG conformance in block |
+| D13 | Every stateful engine module is a **factory**; the composition root owns the instances | Module-level singletons, as the tracer does it |
+| D14 | A game is a **factory** `create(ctx) → instance`, with no module-level state | `setup`/`update`/`teardown` over module-level `let` |
+| D15 | `engine/game-api.ts` is the **only** import surface for `games/**`, enforced in CI | Games importing engine internals by relative path |
+| D16 | The frame loop has an **error boundary** | Let a throwing game freeze the canvas silently |
 
 **D6 in practice:** `pixel` is the default. A game declaring another renderer fills in `rendererWhy`
 in **its own `meta`** (the code is the source, not the manifest), and the build fails when a
 non-`pixel` renderer arrives without one — the deviation stays auditable instead of becoming a habit.
+Crucially, a game never touches a renderer object: it draws through the `Scene` interface of §3.3,
+and a non-pixel renderer is another implementation of that same interface. Without this the escape
+hatch would be a type that promises what the contract cannot deliver.
+
+**D13–D16 come from an audit** of the Phase 1 plan before any of it was written. See §11.
 
 ## 3. Architecture
 
@@ -56,15 +65,17 @@ inclusionist-demos/
 │  ├─ build-catalog.mts        # catalog.json + template → index.html
 │  └─ axe-check.mjs            # a11y gate, lifted from the tracer
 ├─ engine/
-│  ├─ core/      constants, loop, rng, collision, state, i18n, a11y-sr
-│  ├─ input/     keyboard, gamepad, state, latch
-│  ├─ render/    canvas, palette, sprites, fx, high-contrast, cvd-matrices, viz-modes
+│  ├─ game-api.ts              # the ONLY module games may import (D15)
+│  ├─ core/      constants, loop, rng, collision, i18n, a11y-sr
+│  ├─ input/     keyboard, actions, latch, attach
+│  ├─ render/    canvas, mount, scene-pixi, high-contrast, cvd-matrices, viz
 │  ├─ platform/  audio, storage
-│  └─ shell/     boot, router, hud, pause, a11y-regions
+│  └─ shell/     boot, session, router, hud, pause, settings
 └─ games/<category-slug>/<game-slug>/
-   ├─ main.ts
+   ├─ main.ts                  # meta, strings, create(ctx)
+   ├─ rules.ts                 # pure logic, no engine, tested in the node project
    ├─ strings.ts               # pt/en/es dictionary for this game only
-   └─ main.test.ts
+   └─ rules.test.ts
 ```
 
 Slugs derive from the **name**, not the number (`games/arcade-classico/snake/`): reordering the
@@ -85,12 +96,18 @@ creating a folder, with no configuration to touch.
 
 ### 3.3 Game contract
 
+Everything a game may touch is re-exported from **one** module, `engine/game-api.ts`. A game imports
+from that path and from its own folder, and from nothing else (D15).
+
 ```ts
 export const meta: GameMeta;
-export const strings: GameStrings;          // { pt: {…}, en: {…}, es: {…} }
-export function setup(ctx: GameContext): void;
-export function update(dt: number): void;   // dt is in FRAMES, not seconds
-export function teardown(): void;
+export const strings: GameStrings;              // { pt: {…}, en: {…}, es: {…} }
+export function create(ctx: GameContext): GameInstance;   // D14: a factory, not a module singleton
+
+interface GameInstance {
+  update(dt: number): void;                     // dt is in FRAMES, not seconds
+  teardown(): void;
+}
 ```
 
 ```ts
@@ -98,20 +115,37 @@ interface GameMeta {
   slug: string; title: string; category: string;
   density: 'leve' | 'medio' | 'denso';
   players: 1 | 2 | 3 | 4;
-  renderer?: 'pixel' | 'svg' | '3d';        // defaults to 'pixel'
-  rendererWhy?: string;                     // required when renderer !== 'pixel'
+  renderer?: 'pixel' | 'svg' | '3d';            // defaults to 'pixel'
+  rendererWhy?: string;                         // required when renderer !== 'pixel'
 }
+
+/** An opaque drawable. A game moves and hides it; it cannot reach the renderer through it. */
+interface Handle { x: number; y: number; visible: boolean }
+
+interface Scene {
+  add(spec: SpriteSpec): Handle;
+  remove(h: Handle): void;
+  clear(): void;
+}
+
 interface GameContext {
-  stage: Container;                          // PixiJS root, 320×180 logical space
-  input: InputApi;                           // held(pl, act), pressed(pl, act), players
-  sprites: SpriteApi;                        // make({ role, … }) — see 3.5
-  audio: AudioApi; rng: Rng; storage: StorageApi;
+  scene: Scene;                                 // D6/F2: no renderer type crosses this line
+  view: { w: number; h: number; tile: number }; // so a game imports no constants
+  input: InputApi;                              // held(pl, act), pressed(pl, act), players
+  audio: { beep(freq: number, ms: number): void };
+  rng: { rnd(): number; randInt(lo: number, hi: number): number; reseed(s: number): void };
+  storage: { get(k: string, f?: string | null): string | null; set(k: string, v: string | number | boolean): boolean };
   t(key: string, params?: Record<string, string | number>): string;   // namespaced to this game
-  srSay(text: string): void;                 // aria-live polite
-  srAlert(text: string): void;               // aria-live assertive
+  srSay(text: string): void;                    // aria-live polite
+  srAlert(text: string): void;                  // aria-live assertive
   onGameOver(score: number): void;
 }
 ```
+
+**Why `Scene` and not the PixiJS stage.** Handing a game `PIXI.Container` would couple 383 games to
+one library's API, making the version a one-way door, and would flatly contradict D6: a game
+declaring `renderer: 'svg'` would still be handed a PixiJS object. The `Scene` interface is four
+methods wide and a whole renderer deep — the Ousterhout ratio the rest of the engine is judged by.
 
 > [!warning] Two inherited conventions that are easy to break
 > **`dt` is counted in frames, not seconds** — physics copied from a seconds-based tutorial runs wrong.
@@ -308,6 +342,54 @@ nobody verified.
 | en/es translations nobody on the team can verify | Keep per-game strings few and plain; flag the debt rather than presenting the translations as reviewed |
 | Green axe run read as WCAG conformance | §6 states the blind spots in the spec, and every accessibility claim repeats the scope |
 | A game whose entities do not fit the eight sprite roles | `neutral` is the escape hatch; a second such game is the signal to revisit the taxonomy, not to special-case |
+| The `GameContext` shape is a one-way door: 383 games depend on it | Keep it minimal, keep renderer types out of it (D6/D15), and treat any addition as a spec change |
+| A game reaching past `game-api.ts` into engine internals | A dependency check in CI, not a written rule (D15) |
 | Silent fork: this engine drifting from the tracer's | If the two converge in practice, D3 is revisited and the engine becomes a package both consume |
 | Build time growing with hundreds of chunks | The single shell already avoids 383 entries; if it hurts, group chunks by category |
 | `denso` categories inflating scope | Explicit contract: a vertical slice (one room, one boss, one 60-second loop) |
+
+## 11. Audit that produced D13–D16
+
+The Phase 1 plan was audited against the engineering principles the Dev works from — Parnas on
+information hiding, Ousterhout on module depth, Hickey on state, Constantine and Yourdon on coupling
+and cohesion, RFC 9413 on strictness, and evolutionary-architecture fitness functions — **before any
+of it was implemented**. Six findings changed the design. They are recorded here because the reasons
+matter more than the rules, and because the first three were one-way doors: they define the signature
+383 games depend on.
+
+**F1 → D13. Module-level mutable state throughout.** Eight module-scope `let` bindings, plus
+`input/state.ts` exporting a `Set` and an object for *other modules to mutate*. That module hid
+nothing — it was code split into files, which is what Parnas contrasts modularity against. The tell
+was in the tests: `keys.clear()`, `setContrastLevel(0)` and `closePause()` in `beforeEach` hooks. A
+cleanup ritual is the receipt for global state. The design was also incoherent, since `makeLatch` and
+`makeSpriteApi` were already factories. The form was inherited from the tracer without asking whether
+it fitted a collection rather than one game.
+
+**F2 → D6 revised.** `GameContext.stage` exposed `PIXI.Container`, coupling every game to one
+library's API and contradicting D6 in the same breath: a game declaring `renderer: 'svg'` would still
+receive a PixiJS object. Replaced by the `Scene` interface of §3.3.
+
+**F3 → D14.** A game was a module singleton with a lifecycle: `let ctx`, `let state` at module scope,
+driven by `setup` / `teardown` / `setup` on the restart path. It worked by luck rather than by
+construction. `create(ctx)` returning an instance removes the whole class of bug.
+
+**F4 → D15.** Games already imported engine internals by relative path — constants, the collision
+helper, types from the composition root. That contradicted the plan's own claim that a game imports
+nothing from the engine, and a game importing *from the composition root* is backwards. One public
+module, `engine/game-api.ts`, plus a dependency check in CI: at 383 games a written rule with no
+enforcement is a rule that decays on the first hurried session.
+
+**F5 → D16.** A game whose `update` threw would throw again every frame, leaving a frozen canvas and
+no message. Across 383 games, one bad game has to be distinguishable from a broken engine.
+
+**F6.** `boot.ts` was composing *and* running: pause wiring, language redraw, high-score persistence,
+renderer validation. Split into `boot` (composition) and `session` (one game's lifecycle).
+
+Three smaller findings were fixed without a decision entry: `parseCatalog` silently defaulted a
+missing density and id, which is Postel exactly where RFC 9413 says not to be, and now throws;
+`initViz` carried a parameter it did not use, which is a lie in an interface; and the repository had
+no formatter or pre-commit hook, which is cheap now and expensive across hundreds of contributions.
+
+One duplication was left in place deliberately. Pong and Breakout share a paddle-deflection formula.
+Two occurrences are not a pattern, and extracting a shared abstraction from two cases is how the
+wrong abstraction gets built. It is extracted at the third.
