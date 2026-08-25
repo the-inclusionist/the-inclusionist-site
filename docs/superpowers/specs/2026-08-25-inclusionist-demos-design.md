@@ -29,8 +29,9 @@ o manifesto resolve isso com `aliasOf` em vez de duplicar implementação.
 | D7 | Casca única com import dinâmico | 383 entradas em `rollupOptions.input` |
 | D8 | Catálogo **gerado** a partir de `data/catalog.json` | Editar os 383 `<li>` à mão |
 
-**D6 na prática:** `pixel` é o padrão. Um jogo que declare outro renderer precisa preencher
-`rendererWhy` no manifesto — o desvio fica auditável em vez de virar hábito.
+**D6 na prática:** `pixel` é o padrão. Um jogo que declare outro renderer preenche `rendererWhy`
+no **próprio `meta`** (o código é a fonte, não o manifesto), e o build falha se um renderer
+não-`pixel` vier sem justificativa — o desvio fica auditável em vez de virar hábito.
 
 ## 3. Arquitetura
 
@@ -87,6 +88,7 @@ interface GameMeta {
   density: 'leve' | 'medio' | 'denso';
   players: 1 | 2 | 3 | 4;
   renderer?: 'pixel' | 'svg' | '3d';        // default 'pixel'
+  rendererWhy?: string;                     // obrigatório se renderer !== 'pixel'
 }
 interface GameContext {
   stage: Container;                          // raiz PixiJS, espaço lógico 320×180
@@ -129,7 +131,7 @@ Espelha a divisão do tracer, com os módulos reescritos para o escopo daqui:
       { "slug": "snake", "name": "Snake / Cobrinha", "hint": "grid · auto-move · cresce",
         "fresh": false, "status": "todo" },
       { "slug": "snake-roguelite", "name": "Snake roguelite", "hint": "upgrades por morte",
-        "fresh": true, "status": "todo", "aliasOf": null }
+        "fresh": true, "status": "todo", "aliasOf": "hibridos-mashups/snake-roguelite" }
     ]
   }]
 }
@@ -139,12 +141,19 @@ Espelha a divisão do tracer, com os módulos reescritos para o escopo daqui:
 
 1. item `done` vira `<a href="play.html#<categoria>/<slug>">`; `todo` continua texto puro — nada de
    383 links quebrados, e a página vira medidor de progresso honesto;
-2. item com `aliasOf` aponta para o jogo já existente, marcado como variação;
+2. item com `aliasOf` (formato `"<categoria>/<slug>"`) aponta para o jogo já existente, marcado
+   como variação, e não gera pasta própria em `games/`;
 3. as estatísticas do hero passam a ser **calculadas**, o que conserta o "280+" hoje defasado (são 383);
 4. hero, intro, changelog, CTA, rodapé e todo o CSS vêm do template, intocados.
 
 `import-catalog.mts` roda uma vez para extrair o JSON do HTML atual, preservando nome, hint, marca
 `fresh`, densidade, cor de acento e badge `NEW`.
+
+**Destino do arquivo atual:** na Fase 1, `minigames-catalog-v2.html` é dividido — a prosa e o CSS
+viram `src/catalog.template.html`, os dados viram `data/catalog.json`, e o arquivo original sai da
+raiz. O `index.html` gerado continua **autocontido e abrível offline**, que é a única propriedade
+do arquivo original que precisa sobreviver. O histórico do git preserva o original, e o commit que
+o remove cita esta seção.
 
 ## 5. Testes
 
