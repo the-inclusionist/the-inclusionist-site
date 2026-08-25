@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.vite/
+
+# local, machine-specific launch configuration (never versioned)
+.claude/launch.json
+
+# personal scratch notes — keep them out of the repo, not in the README
+TODO.local.md
+*.local.md
+
+# editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
