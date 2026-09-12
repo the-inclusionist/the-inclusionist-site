@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "about": "The seven games of the demonstration release, and the BNCC skills each one carries. Keys are English (CLAUDE.md: artifacts in English); values that a child or a teacher reads are pt-BR, because they are the product.",
+  "curriculum": {
+    "id": "BNCC",
+    "name": "Base Nacional Comum Curricular",
+    "country": "Brasil",
+    "flag": "🇧🇷",
+    "source": "BNCC_EI_EF_110518_versaofinal_site.pdf — enunciados transcritos verbatim. ⚠️ Reconferir em basenacionalcomum.mec.gov.br antes de publicar."
+  },
+  "tagClasses": {
+    "works": "O jogo TRABALHA a habilidade: ela sustenta o jogo (não dá para ganhar contornando-a) e o jogo oferece a mediação que a torna alcançável com ajuda.",
+    "material": "O jogo SERVE DE MATERIAL para a aula sobre a habilidade; o trabalho é do professor. É a classe das habilidades cujo verbo é «experimentar e fruir», e das que o jogo mostra sem exigir."
+  },
+  "skills": [
+    { "code": "EF02MA08", "component": "mat", "band": "Matemática · 2º ano", "text": "Resolver e elaborar problemas envolvendo dobro, metade, triplo e terça parte, com o suporte de imagens ou material manipulável, utilizando estratégias pessoais." },
+    { "code": "EF01MA06", "component": "mat", "band": "Matemática · 1º ano", "text": "Construir fatos básicos da adição e utilizá-los em procedimentos de cálculo para resolver problemas." },
+    { "code": "EF02MA05", "component": "mat", "band": "Matemática · 2º ano", "text": "Construir fatos básicos da adição e subtração e utilizá-los no cálculo mental ou escrito." },
+    { "code": "EF03MA07", "component": "mat", "band": "Matemática · 3º ano", "text": "Resolver e elaborar problemas de multiplicação (por 2, 3, 4, 5 e 10) com os significados de adição de parcelas iguais e elementos apresentados em disposição retangular." },
+    { "code": "EF04MA07", "component": "mat", "band": "Matemática · 4º ano", "text": "Resolver e elaborar problemas de divisão cujo divisor tenha no máximo dois algarismos, envolvendo os significados de repartição equitativa e de medida." },
+    { "code": "EF05MA03", "component": "mat", "band": "Matemática · 5º ano", "text": "Identificar e representar frações (menores e maiores que a unidade), associando-as ao resultado de uma divisão ou à ideia de parte de um todo." },
+    { "code": "EF06MA05", "component": "mat", "band": "Matemática · 6º ano", "text": "Classificar números naturais em primos e compostos, estabelecer relações entre números, expressas pelos termos «é múltiplo de», «é divisor de», «é fator de», e estabelecer, por meio de investigações, critérios de divisibilidade por 2, 3, 4, 5, 6, 8, 9, 10, 100 e 1000." },
+    { "code": "EF06MA06", "component": "mat", "band": "Matemática · 6º ano", "text": "Resolver e elaborar problemas que envolvam as ideias de múltiplo e de divisor." },
+    { "code": "EF04MA19", "component": "mat", "band": "Matemática · 4º ano", "text": "Reconhecer simetria de reflexão em figuras e em pares de figuras geométricas planas e utilizá-la na construção de figuras congruentes, com o uso de malhas quadriculadas e de softwares de geometria." },
+    { "code": "EF07MA21", "component": "mat", "band": "Matemática · 7º ano", "text": "Reconhecer e construir figuras obtidas por simetrias de translação, rotação e reflexão, usando instrumentos de desenho ou softwares de geometria dinâmica e vincular esse estudo a representações planas de obras de arte, elementos arquitetônicos, entre outros." },
+    { "code": "EF35EF01", "component": "ef", "band": "Educação Física · 3º–5º", "text": "Experimentar e fruir brincadeiras e jogos populares do Brasil e do mundo, incluindo aqueles de matriz indígena e africana, e recriá-los, valorizando a importância desse patrimônio histórico cultural." },
+    { "code": "EF67EF01", "component": "ef", "band": "Educação Física · 6º–7º", "text": "Experimentar e fruir, na escola e fora dela, jogos eletrônicos diversos, valorizando e respeitando os sentidos e significados atribuídos a eles por diferentes grupos sociais e etários." },
+    { "code": "EF67EF02", "component": "ef", "band": "Educação Física · 6º–7º", "text": "Identificar as transformações nas características dos jogos eletrônicos em função dos avanços das tecnologias e nas respectivas exigências corporais colocadas por esses diferentes tipos de jogos." },
+    { "code": "EF67EF05", "component": "ef", "band": "Educação Física · 6º–7º", "text": "Planejar e utilizar estratégias para solucionar os desafios técnicos e táticos, tanto nos esportes de marca, precisão, invasão e técnico-combinatórios como nas modalidades esportivas escolhidas para praticar de forma específica." },
+    { "code": "EF89EF03", "component": "ef", "band": "Educação Física · 8º–9º", "text": "Formular e utilizar estratégias para solucionar os desafios técnicos e táticos, tanto nos esportes de campo e taco, rede/parede, invasão e combate como nas modalidades esportivas escolhidas para praticar de forma específica." }
+  ],
+  "games": [
+    {
+      "id": "chess",
+      "repo": "the-inclusionist/game-chess",
+      "package": "@the-inclusionist/game-chess",
+      "emoji": "♟️",
+      "name": { "pt": "Xadrez" },
+      "desc": { "pt": "Xadrez completo com adversário em onze níveis, curso de treze lições e duzentas táticas. Três vistas de tabuleiro e dois jogadores no mesmo aparelho." },
+      "genre": { "pt": "Tabuleiro · estratégia" },
+      "players": "1–2 no mesmo aparelho",
+      "views": ["2D", "2,5D", "3D"],
+      "state": "playable",
+      "bncc": {
+        "works": [],
+        "material": ["EF35EF01", "EF67EF01", "EF67EF02"]
+      },
+      "note": "Nenhuma etiqueta de trabalho, e é facto sobre a norma e não defeito do jogo: é o maior aparato de ensino dos sete — treze lições, professor que se liga ao terceiro erro na MESMA posição — e o que ele ensina é xadrez, que não é habilidade da BNCC. As coordenadas foram recusadas: ganha-se sem ler um rótulo. As três vistas fazem dele o melhor instrumento da EF67EF02."
+    },
+    {
+      "id": "platformer",
+      "repo": "the-inclusionist/game-platformer",
+      "package": "@the-inclusionist/game-platformer",
+      "emoji": "🏃",
+      "name": { "pt": "Plataforma" },
+      "desc": { "pt": "Plataforma 2D onde as moedas se ganham resolvendo atividades de alfabetização, matemática e reciclagem. De um a quatro jogadores, cada um na sua tela." },
+      "genre": { "pt": "Plataforma 2D" },
+      "players": "1–4 em telas separadas",
+      "state": "playable",
+      "bncc": {
+        "works": ["EF01MA06", "EF02MA05", "EF03MA07", "EF04MA07", "EF05MA03"],
+        "material": ["EF67EF01", "EF67EF02"]
+      },
+      "note": "O único dos sete com currículo escolar embutido, e o que passa no crivo com folga: o quiz PORTEIA a moeda — duas tentativas antes de revelar, três vitórias por moeda —, então não há como progredir contornando a atividade. ⚠️ As habilidades de ALFABETIZAÇÃO (psicogênese de Ferreiro, Braille) estão por mapear: exigem uma passagem contra a lista de Língua Portuguesa que ainda não foi feita. Ficam de fora até serem medidas, e não estimadas."
+    },
+    {
+      "id": "pinball",
+      "repo": "the-inclusionist/game-pinball",
+      "package": "@the-inclusionist/game-space-cadet",
+      "emoji": "🕹️",
+      "name": { "pt": "Pinball" },
+      "desc": { "pt": "Fliperama com sete mesas e missões em dois atos. Está a virar um construtor: a criança monta a própria mesa e partilha com quem quiser jogá-la." },
+      "genre": { "pt": "Fliperama" },
+      "players": "1",
+      "state": "playable",
+      "bncc": {
+        "works": [],
+        "material": ["EF35EF01", "EF67EF01", "EF67EF02"],
+        "planned": ["EF04MA19", "EF07MA21"]
+      },
+      "note": "Sem etiqueta de trabalho HOJE: zero conteúdo curricular, confirmado por varredura. As duas planeadas chegam com o EDITOR DE MESAS — colocar é transladar, virar é rodar, espelhar é refletir, que é o encaixe mais próximo de todo o catálogo entre os verbos de uma habilidade e os controlos reais de um jogo. E a BNCC nomeia o instrumento: «com o uso de softwares de geometria». Nada é etiquetado antes de existir."
+    },
+    {
+      "id": "whackwhack",
+      "repo": "the-inclusionist/game-whackwhack",
+      "package": "@the-inclusionist/game-whackwhack",
+      "emoji": "🔨",
+      "name": { "pt": "Whack Whack" },
+      "desc": { "pt": "Martele só as lajes cujo número é múltiplo do que a rodada pede. Oito categorias, de dois a nove, e a dificuldade é quantas acendem juntas." },
+      "genre": { "pt": "Ação · reflexo" },
+      "players": "1",
+      "state": "playable",
+      "bncc": {
+        "works": ["EF06MA05", "EF06MA06"],
+        "material": ["EF35EF01", "EF67EF01", "EF67EF02"]
+      },
+      "note": "O caso mais limpo dos sete. Cada martelada é um juízo de múltiplo e a laje errada é um perigo, então não há como pontuar por fora; e a mediação é declarada CURRICULAR, separada do modo fácil de acessibilidade. 📏 As categorias do jogo são 2,3,4,5,6,7,8,9 e a lista da EF06MA05 é 2,3,4,5,6,8,9 — batem em sete de oito, e o desencontro é o 7, o único divisor sem critério simples."
+    },
+    {
+      "id": "soccer",
+      "repo": "the-inclusionist/game-soccer",
+      "package": "@the-inclusionist/game-soccer",
+      "emoji": "⚽",
+      "name": { "pt": "Futebol" },
+      "desc": { "pt": "Futebol com árbitro de verdade: impedimento, escanteio, lateral e tempo. Doze clubes para escolher, e três relógios — inclusive um por turnos." },
+      "genre": { "pt": "Esporte · simulação" },
+      "players": "1",
+      "state": "playable",
+      "bncc": {
+        "works": [],
+        "material": ["EF67EF05", "EF89EF03", "EF67EF01", "EF67EF02"]
+      },
+      "note": "As duas de esporte entram aqui e foram RECUSADAS ao xadrez, e a diferença é o objeto: futebol é esporte de invasão, que as duas nomeiam; xadrez não está em categoria nenhuma delas. Ficam como material e não como trabalho porque a Educação Física é cultura corporal de MOVIMENTO — decidir a tática numa simulação não é praticá-la. ⚠️ Por isso as habilidades de «praticar» e «experimentar e fruir» esportes ficam de fora: essas pedem corpo e bola."
+    },
+    {
+      "id": "15puzzle",
+      "repo": "the-inclusionist/game-15puzzle",
+      "package": "@the-inclusionist/game-15puzzle",
+      "emoji": "🔢",
+      "name": { "pt": "Quebra-cabeça de 15" },
+      "desc": { "pt": "Deslizante de 3×3 a 5×5. Uma tecla desliza a linha inteira e conta como uma jogada. A dica é livre e ilimitada: aqui não existe jogada errada." },
+      "genre": { "pt": "Quebra-cabeça" },
+      "players": "1",
+      "state": "playable",
+      "bncc": {
+        "works": [],
+        "material": ["EF35EF01", "EF67EF01", "EF67EF02"]
+      },
+      "note": "Uma etiqueta de ordenação foi PROPOSTA e retirada: ordenar é o estado de chegada, não o trabalho. Quem conta até quinze não está mais perto de resolver. O que a criança não faz sozinha é planear uma sequência que alcance o alvo sem destruir o que já está no lugar — e as habilidades de algoritmo da BNCC pedem que o plano seja EXTERNALIZADO num fluxograma, coisa que o jogo não pede. Fica a um passo de desenho."
+    },
+    {
+      "id": "2048",
+      "repo": "the-inclusionist/game-2048",
+      "package": "@the-inclusionist/game-2048",
+      "emoji": "🔺",
+      "name": { "pt": "2048" },
+      "desc": { "pt": "Junte peças iguais para dobrar o valor. O objetivo conta-se em dobras e não em pontos, e a narração diz as parcelas: «2 e 2 viraram 4»." },
+      "genre": { "pt": "Quebra-cabeça · números" },
+      "players": "1",
+      "state": "playable",
+      "bncc": {
+        "works": ["EF02MA08"],
+        "material": ["EF67EF01", "EF67EF02"]
+      },
+      "note": "Toda fusão é uma duplicação, então não se pontua sem dobrar; e a narração nomeia as duas parcelas e o resultado, que é mediação e não decoração. ⚠️ A etiqueta de POTÊNCIAS foi a mais tentadora do catálogo e caiu: o expoente é real mas interno, e a criança nunca escreve uma potência nem toca em notação científica. Ela vê peças que dobram."
+    }
+  ]
+}
