@@ -18,10 +18,11 @@ which will hold everything the official site will hold.
 | Piece | What it is |
 |---|---|
 | `index.html` | The journey in three steps: BNCC skills → game → play. No build, no external dependency, no third-party font. |
-| `data/games.json` | The catalogue of the **seven** own games — chess, platformer, pinball, whack-whack, soccer, 15-Puzzle and 2048 — with description, genre, and the BNCC tags that filter them. |
+| `data/games.json` | The catalogue of the own games, with description, genre, and the BNCC tags that filter them. ⚠️ **The roster lives here and nowhere else** — no page, heading or document states how many there are. |
 | `identidade.html` | The visual identity as a case study: symbol, colour, typography and geometry, with the contrast ratios **computed in the page itself** from the tokens that paint it. |
 | `404.html` | The 404, which is also the mechanism: Cloudflare Pages serves this file with status 404 for any path that matches no asset. |
 | `img/` | The assets the pages serve: the logo SVG set in `img/logo/`, and the 404 image. |
+| `docs/` | Hosting, architecture, the cartridge contract, the journey and the BNCC tags — documents that **cite** the records rather than containing them. |
 
 ### The prototype canvases are gone, and that is deliberate
 
@@ -36,7 +37,6 @@ longer here to be checked against.
 
 They are still readable from the history when one is needed:
 `git show fa4ec2e:research/design-system/Inclusionista-Marca.dc.html`.
-| `docs/` | Hosting, architecture, the cartridge contract, the journey and the BNCC tags — documents that **cite** the records rather than containing them. |
 
 ⚠️ **What is still missing: the manifest.** It is the centrepiece of the new role — game, version, and why
 it is in this delivery — and it does not exist. Until it does, this repository describes a role it does

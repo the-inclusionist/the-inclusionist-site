@@ -91,7 +91,12 @@ that is all. The checkable account of the identity is `identidade.html`.
 holds the game up **and** the game supplies mediation for it. If you can play and win without exercising the
 skill, the game does not teach it — chess has coordinate reading and still does not work it, because not
 reading coordinates stops nobody from winning. BNCC items are **tags for filtering**, and that is all they
-are. Four of the seven games work no skill at all, and saying so is the point.
+are. Some games work no skill at all, and saying so is the point.
+
+⚠️ **The roster lives in `data/games.json` and nowhere else.** Never write the count into prose — not
+into a page, a heading, a button label or a README. `index.html` derives every "N games" string from
+`dados.games.length` at runtime, and `404.html`, which must work with scripting off, simply does not count.
+A number in prose is wrong the day a game is added, and wrong silently.
 
 ## Where the engine rules live
 

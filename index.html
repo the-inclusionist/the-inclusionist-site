@@ -191,7 +191,7 @@ footer.rodape div { max-width:1100px; margin:0 auto; }
 
     <div class="acoes">
       <button type="button" class="btn" id="irP2">Ver os jogos</button>
-      <button type="button" class="btn btn--quieto" id="verTodos">Ver todos os sete, sem filtrar</button>
+      <button type="button" class="btn btn--quieto" id="verTodos">Ver todos, sem filtrar</button>
     </div>
   </section>
 
@@ -221,8 +221,8 @@ footer.rodape div { max-width:1100px; margin:0 auto; }
 <footer class="rodape">
   <div>
     <p>
-      <strong>Esta é uma demonstração.</strong> Os sete jogos existem e são jogáveis nos seus próprios
-      repositórios; o que ainda não existe é a entrega — o manifesto que diz quais jogos e quais versões
+      <strong>Esta é uma demonstração.</strong> Os jogos do catálogo existem e são jogáveis nos seus
+      próprios repositórios; o que ainda não existe é a entrega — o manifesto que diz quais jogos e quais versões
       entram numa versão, e a publicação de cada um como cartucho. Enquanto isso, o passo 3 diz o que
       falta em vez de fingir que carrega.
     </p>
@@ -356,10 +356,10 @@ footer.rodape div { max-width:1100px; margin:0 auto; }
     const lista = sel ? dados.games.filter((g) => cobre(g).length) : dados.games;
 
     $('#resumoFiltro').textContent = sel
-      ? 'Sete jogos no catálogo; '
+      ? dados.games.length + ' jogos no catálogo; '
         + (lista.length === 0 ? 'nenhum atende' : lista.length === 1 ? '1 atende' : lista.length + ' atendem') + ' '
         + (escolhidas.size === 1 ? 'à habilidade marcada' : 'ao menos uma das ' + escolhidas.size + ' habilidades marcadas') + '.'
-      : 'Os sete jogos da versão de demonstração.';
+      : 'Os ' + dados.games.length + ' jogos da versão de demonstração.';
 
     // A LACUNA, e ela é do achado 02 do Postmortem: marcar quatro habilidades e receber uma lista sem
     // dizer o que ficou de fora obriga o professor a abrir tudo para descobrir. Melhor dizer.
@@ -378,7 +378,7 @@ footer.rodape div { max-width:1100px; margin:0 auto; }
     }
 
     if (!lista.length) {
-      alvo.innerHTML = '<p class="vazio">Nenhum dos sete jogos atende '
+      alvo.innerHTML = '<p class="vazio">Nenhum dos ' + dados.games.length + ' jogos atende '
         + (escolhidas.size === 1 ? 'à habilidade marcada' : 'às habilidades marcadas') + '.</p>';
       return;
     }
@@ -445,7 +445,8 @@ footer.rodape div { max-width:1100px; margin:0 auto; }
     d.className = 'aviso';
     d.innerHTML =
       '<p><strong>' + g.name.pt + ' ainda não entra nesta entrega.</strong> O jogo existe e é jogável — '
-      + 'ele vive em <code>' + g.repo + '</code> — mas nenhum dos sete está publicado como cartucho, e '
+      + 'ele vive em <code>' + g.repo + '</code> — mas nenhum jogo do catálogo está publicado como '
+      + 'cartucho, e '
       + 'o manifesto que escolhe quais entram numa versão ainda não foi escrito.</p>'
       + '<p>Esta tela diz isso em vez de mostrar uma moldura vazia. Quando o manifesto existir, é aqui '
       + 'que o cartucho entra, nesta mesma página e na mesma origem — sem aba nova e sem iframe.</p>';

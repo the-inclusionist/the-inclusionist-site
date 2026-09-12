@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "The seven games of the demonstration release, and the BNCC skills each one carries. Keys are English (CLAUDE.md: artifacts in English); values that a child or a teacher reads are pt-BR, because they are the product.",
+  "about": "The games of the demonstration release, and the BNCC skills each one carries. This file is the ONLY place the roster lives: nothing else may state how many there are, because a count written in prose is wrong the day a game is added. Keys are English (CLAUDE.md: artifacts in English); values that a child or a teacher reads are pt-BR, because they are the product.",
   "curriculum": {
     "id": "BNCC",
     "name": "Base Nacional Comum Curricular",
@@ -45,7 +45,7 @@
         "works": [],
         "material": ["EF35EF01", "EF67EF01", "EF67EF02"]
       },
-      "note": "Nenhuma etiqueta de trabalho, e é facto sobre a norma e não defeito do jogo: é o maior aparato de ensino dos sete — treze lições, professor que se liga ao terceiro erro na MESMA posição — e o que ele ensina é xadrez, que não é habilidade da BNCC. As coordenadas foram recusadas: ganha-se sem ler um rótulo. As três vistas fazem dele o melhor instrumento da EF67EF02."
+      "note": "Nenhuma etiqueta de trabalho, e é facto sobre a norma e não defeito do jogo: é o maior aparato de ensino do catálogo — treze lições, professor que se liga ao terceiro erro na MESMA posição — e o que ele ensina é xadrez, que não é habilidade da BNCC. As coordenadas foram recusadas: ganha-se sem ler um rótulo. As três vistas fazem dele o melhor instrumento da EF67EF02."
     },
     {
       "id": "platformer",
@@ -61,7 +61,7 @@
         "works": ["EF01MA06", "EF02MA05", "EF03MA07", "EF04MA07", "EF05MA03"],
         "material": ["EF67EF01", "EF67EF02"]
       },
-      "note": "O único dos sete com currículo escolar embutido, e o que passa no crivo com folga: o quiz PORTEIA a moeda — duas tentativas antes de revelar, três vitórias por moeda —, então não há como progredir contornando a atividade. ⚠️ As habilidades de ALFABETIZAÇÃO (psicogênese de Ferreiro, Braille) estão por mapear: exigem uma passagem contra a lista de Língua Portuguesa que ainda não foi feita. Ficam de fora até serem medidas, e não estimadas."
+      "note": "O único do catálogo com currículo escolar embutido, e o que passa no crivo com folga: o quiz PORTEIA a moeda — duas tentativas antes de revelar, três vitórias por moeda —, então não há como progredir contornando a atividade. ⚠️ As habilidades de ALFABETIZAÇÃO (psicogênese de Ferreiro, Braille) estão por mapear: exigem uma passagem contra a lista de Língua Portuguesa que ainda não foi feita. Ficam de fora até serem medidas, e não estimadas."
     },
     {
       "id": "pinball",
@@ -94,7 +94,7 @@
         "works": ["EF06MA05", "EF06MA06"],
         "material": ["EF35EF01", "EF67EF01", "EF67EF02"]
       },
-      "note": "O caso mais limpo dos sete. Cada martelada é um juízo de múltiplo e a laje errada é um perigo, então não há como pontuar por fora; e a mediação é declarada CURRICULAR, separada do modo fácil de acessibilidade. 📏 As categorias do jogo são 2,3,4,5,6,7,8,9 e a lista da EF06MA05 é 2,3,4,5,6,8,9 — batem em sete de oito, e o desencontro é o 7, o único divisor sem critério simples."
+      "note": "O caso mais limpo do catálogo. Cada martelada é um juízo de múltiplo e a laje errada é um perigo, então não há como pontuar por fora; e a mediação é declarada CURRICULAR, separada do modo fácil de acessibilidade. 📏 As categorias do jogo são 2,3,4,5,6,7,8,9 e a lista da EF06MA05 é 2,3,4,5,6,8,9 — batem em sete de oito, e o desencontro é o 7, o único divisor sem critério simples."
     },
     {
       "id": "soccer",
