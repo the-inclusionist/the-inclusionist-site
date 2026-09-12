@@ -1,6 +1,20 @@
 # Design — inclusionist-demos: one game per catalog item
 
-**Date:** 2026-08-25 · **Status:** approved by the Dev · **Scope:** architectural
+**Date:** 2026-08-25 · **Status:** SUPERSEDED — kept as provenance · **Scope:** architectural
+
+> [!caution] Do not execute from this document.
+> The role it designs — one game per catalog entry, 383 subgenres, this repository as the unit of
+> delivery — was ended by **ADR-0068**. The games now live one per repository and this one holds the
+> manifest plus the public surface.
+>
+> It is kept for one reason: its **decision table D1–D16** is cited by name from several records
+> (ADR-0035, 0036, 0038, 0041, 0048, 0054, 0055, 0058, 0068, 0083), so deleting it would strand those
+> citations. Read it to find out *why* a rule exists — never to find out what to build. **Where this
+> document and a record disagree, the record wins.**
+>
+> Its companion, the phase-1 foundation plan, was deleted for the opposite reason: no record cited it,
+> and 7210 lines of step-by-step build instructions for a cancelled phase are a trap. It is recoverable
+> from the history if ever needed.
 
 > [!note] Language of artifacts
 > **English throughout** — documentation, code, comments and commit messages — matching the tracer

@@ -10,10 +10,13 @@ is itself a decision (**ADR-0068 §5**, **ADR-0123**): three hundred places to d
 hundred places where one decision silently contradicts another. Before deciding anything structural here,
 read the record; before writing a decision down, write it there.
 
-⚠️ **`docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md` is history, not the authority.** It
-designs the superseded role — one game per catalog entry, 383 subgenres, this repository as the unit of
-delivery. **ADR-0068** ended that. The spec is kept because its decision table (D1–D16) is still the
-provenance of several engine rules, but nothing in it outranks a record.
+⚠️ **`docs/superpowers/specs/…-inclusionist-demos-design.md` is history, not the authority.** It designs
+the superseded role — one game per catalog entry, 383 subgenres, this repository as the unit of delivery.
+**ADR-0068** ended that. It is kept for one reason: its decision table **D1–D16** is cited by name from ten
+records, so deleting it would strand those citations. Read it to learn *why* a rule exists, never what to
+build; where it and a record disagree, the record wins. Its companion phase-1 plan was **deleted** — no
+record cited it, and 7210 lines of build steps for a cancelled phase are something a future session runs by
+mistake.
 
 ## What this is
 
