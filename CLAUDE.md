@@ -4,80 +4,96 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Read this first
 
-**[docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md](docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md) is the authority.** It holds the decision table (D1–D16), the
-architecture, what is lifted from the tracer, the phasing and the non-goals. This file is the entry
-rules and the pointers; do not duplicate the spec here — a duplicated fact rots.
+**The records are the authority, and they are not here.** They live in `the-inclusionist-docs`, under
+`docs/2-Architecture/adr/` — 143 of them today. There is **no `adr/` folder in this repository**, and that
+is itself a decision (**ADR-0068 §5**, **ADR-0123**): three hundred places to decide architecture are three
+hundred places where one decision silently contradicts another. Before deciding anything structural here,
+read the record; before writing a decision down, write it there.
+
+⚠️ **`docs/superpowers/specs/2026-08-25-inclusionist-demos-design.md` is history, not the authority.** It
+designs the superseded role — one game per catalog entry, 383 subgenres, this repository as the unit of
+delivery. **ADR-0068** ended that. The spec is kept because its decision table (D1–D16) is still the
+provenance of several engine rules, but nothing in it outranks a record.
 
 ## What this is
 
-A collection of JS minigames in 320×180 pixel art: one playable game for each of the 383 subgenres
-listed in the catalog page, each in its own folder, linked from its catalog entry. The stack and
-conventions come from `SP-the-inclusionist-tracer` (sibling directory, GitLab `jrocha-dev/the-inclusionist`).
+Two things, both under **ADR-0068**:
 
-**State as of 2026-08-25: Phase 0 is done, Phase 1 has not started.** The repository holds the
-catalog page and the spec. There is no `package.json`, no engine, no game, and therefore **no build,
-test or lint command yet** — do not invent one. Phase 1 creates the toolchain (Node 24, TypeScript,
-Vite, Vitest, PixiJS 7.4.2, `vite-plugin-pwa`), mirroring the tracer's versions. The plan for it is
-[docs/superpowers/plans/2026-08-25-phase-1-foundation.md](docs/superpowers/plans/2026-08-25-phase-1-foundation.md).
+1. **The manifest** — which games, at which versions, go into a delivery. ⚠️ **It does not exist yet.** Until
+   it does, this repository describes a role it does not yet perform.
+2. **The public surface** — the definitive demonstration address, which will hold everything the official
+   site will hold. That part exists: `index.html`, `data/games.json`, `identidade.html`, `404.html`.
+
+The games are **not** here. Each is its own repository, `game-<slug>` under **ADR-0082**. The reason is the
+byte budget, not tidiness: pillar 1 is public-school hardware and pillar 8 is an offline PWA, so the
+precache budget always forbade shipping the whole catalogue to the device.
+
+## State, and what not to invent
+
+There is **no `package.json`** — therefore **no build, no test and no lint command**. Do not invent one, and
+do not add a toolchain to make a change convenient. Every page is hand-written, self-contained, and opens
+by double-clicking it. That is a property worth defending: a site that needs a build step is a site that
+will be broken on the day someone needs to fix it in a hurry.
 
 ## Conventions
 
-- **English for every artifact** — docs, code, comments, commit messages. The conversation with the
-  Dev is pt-BR. Exception: the catalog page's own content (category names, subgenre names and hints)
-  stays pt-BR, because it is the product.
-- **GPL-3.0-or-later**, with an SPDX header on every source file, as in the tracer.
-- **Atomic, frequent commits** in English. Never one giant "initial". No absolute paths in versioned files.
-- Decisions worth keeping go into the spec in the same turn they are made, not left as chat prose.
+- **English for every artifact** — docs, code, comments, commit messages, file names. The conversation with
+  the Dev is pt-BR. ⚠️ **The exception is product surface only**: the text a child, a teacher or a parent
+  reads on the page stays pt-BR, because it is the product. The comments inside that same file are English.
+  A commit message is an artifact, not conversation — it goes in English even when everything around it is
+  pt-BR.
+- **AGPL-3.0-or-later** (**ADR-0064**), with an SPDX header on every source file. The `LICENSE` at the root
+  is the AGPL; anything claiming GPL-3.0 here is stale and wrong.
+  ⚠️ **The art is not AGPL.** A program is what Law 9.609 defines; art follows Law 9.610.
+- **Atomic commits.** One commit carries **one separable decision**. A data artifact, the page that consumes
+  it, the removal of what it replaces and an asset move are four commits, not one. Order them by dependency
+  — assets, then data, then consumer, then documentation — so each commit leaves the tree coherent on its
+  own. Announce what goes in before committing.
+- **The Dev pushes.** Commit, say how many are waiting, and stop. Never `git push`, never `gh pr create`,
+  never anything that deploys or spends.
 
-## Structural rules (spec D13–D16)
+## The rules the pages carry
 
-These came out of auditing the Phase 1 plan before writing it, and they are the reason a game costs
-about thirty lines of overhead instead of three hundred:
+These are not style preferences; each came from a measurement, and undoing one silently costs accessibility.
 
-- **No module-level mutable state in the engine.** A module that holds state exports `createX()`; the
-  composition root owns the instance. A test needing a `beforeEach` hook to undo the previous test
-  means the module is wrong, not the test.
-- **A game is a factory**: `create(ctx)` returns `{ update, teardown }`, with no `let` at module scope.
-- **`games/**` may import only `engine/game-api.ts`** and files in its own folder. `npm run lint:deps`
-  enforces it — do not relax the rule to make an import work; add what is missing to the context.
-- **No PixiJS type may appear in anything a game can see.** Games draw through `Scene`/`Handle`.
-- **The frame loop has an error boundary.** One broken game must stay distinguishable from a broken engine.
+- **No third-party fonts, no CDN, no external anything.** Postmortem finding 04: package the fonts with the
+  product, with per-language subsetting, served locally. A page that promises to work offline while asking a
+  third party for its letterforms has already broken the promise — invisibly, because on the developer's
+  machine the font is cached. The named debt is Jersey 15 and Atkinson Hyperlegible; until there is a build
+  that packages them, the pages use the system stack.
+- **`--yellow` FILLS, `--yellowInk` draws LINES.** In the light theme the fill yellow measures 1.3–1.5:1
+  against every surface, so a border or an outline made of it draws nothing; `--yellowInk` measures 5.4–6.1:1.
+  In the dark theme they are the same colour, which is exactly what hides the mistake. Every border, boundary
+  and focus ring uses `--yellowInk`.
+- **The focus ring needs `outline-offset`.** Without it, focus on the primary button is yellow on yellow,
+  1.0:1, in both themes. The offset lands the ring on the page instead of on the button.
+- **Never put brand green `#0B7A46` next to brand blue `#2E5BFF`.** They measure 1.0:1 — the same luminance.
+  Inside the symbol the yellow cross separates them on all four sides; nowhere else will it be there to.
+- **44 px touch targets, zero `border-radius`, the 8 px spacing scale, colour never the only signal.**
+- **`404.html` uses root-absolute paths for everything.** It is the one page whose address is not its own:
+  Pages serves that file at whatever URL was requested, so a relative path breaks at depth.
+- **`identidade.html` computes its contrast ratios** from the tokens that paint it. Do not transcribe a
+  ratio into it. The brandbook stated seven and five were wrong, which is the whole reason.
 
-## Two inherited conventions that are easy to break
+## `research/` is gone, and stays gone
 
-- **`dt` is counted in frames, not seconds.** Physics copied from a seconds-based tutorial runs wrong.
-- **The keyboard is listened to on `#game-region`, not on `window`.** On `window` the game steals the
-  page's keys.
+It held the brand, design-system, journey and postmortem prototype canvases. They are **design fiction**:
+written to make a screen work, not audited. Measured against the BNCC, several of the Jornada's skill rows
+describe a different skill than the code names. The folder is deleted and in `.gitignore`.
 
-## The catalog page
+⚠️ **Nothing downstream may treat those canvases as a source.** They are readable from the history
+(`git show fa4ec2e:research/design-system/<file>`) when a brand question needs the original wording, and
+that is all. The checkable account of the identity is `identidade.html`.
 
-[minigames-catalog-v2.html](minigames-catalog-v2.html) is currently the only content: a self-contained
-pt-BR page, 35 categories and 383 subgenres, dark neon terminal aesthetic, no JavaScript. Its only
-network dependency is the Google Fonts stylesheet — the "0 dependências" claim in the hero is about
-runtime and build deps, not that link.
+## The one rule that is easy to get wrong in `data/games.json`
 
-In Phase 1 this file is split (prose and CSS into `src/catalog.template.html`, data into
-`data/catalog.json`) and the root page becomes generated output. Until then, **the markup semantics
-below are what `import-catalog.mts` must preserve**, so they are worth knowing before touching it:
+`works` versus `material` is not a filtering convenience. A game only **works** a BNCC item if the skill
+holds the game up **and** the game supplies mediation for it. If you can play and win without exercising the
+skill, the game does not teach it — chess has coordinate reading and still does not work it, because not
+reading coordinates stops nobody from winning. BNCC items are **tags for filtering**, and that is all they
+are. Four of the seven games work no skill at all, and saying so is the point.
 
-- `article.card.cat-N` — `cat-N` is the only thing that sets `--accent`, which drives the left rail,
-  the title color, the `▸` bullets and the `NEW` badge. A card without a matching `.card.cat-N` rule
-  silently falls back to `--c1`.
-- `.card-num` holds `NN / 35`; the denominator is hardcoded in all 35 cards.
-- `.density-dots[data-level="leve|medio|denso"]` lights 1, 2 or 3 dots via `:nth-child`. All three
-  `<span class="dot">` children must always be present. The adjacent `Densidade: …` label is a
-  separate hardcoded string that must agree with `data-level`.
-- `li.fresh` renders a yellow `+` bullet (subgenre added in v2); `.new-badge` marks a whole category
-  added in v2 (cards 31–35).
-- Subgenre entries read `Nome <small>qualificador em minúsculas</small>`, no trailing period.
+## Where the engine rules live
 
-Editing it by hand means sweeping every invariant at once: the `--cN` token and its `.card.cat-N`
-rule, the `NN / 35` denominator in all 35 cards, `.section-head .count`, the five hand-written hero
-statistics, the version string in five places, and the changelog prose. That fragility is the reason
-for D8 — the generator retires all of it.
-
-## Style of the page
-
-Stylesheet sections are marked `/* ────────── NAME ────────── */`, markup sections `<!-- NAME ─── -->`,
-and card blocks are preceded by `<!-- NN -->` (or `<!-- NN NEW -->`). Dark tokens only, no light
-theme branch, monospace body text, uppercase letter-spaced micro-labels, `//` prefixes on eyebrow text.
+Anything about the engine, the cartridge contract, frame timing or input belongs in the engine repository
+and its records — not here. This repository ships no game code.
