@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inclusionista — todo mundo joga, todo mundo aprende</title>
+<meta name="description" content="Plataforma de minijogos em pixel art alinhados à BNCC. Escolha as habilidades, escolha o jogo, jogue — acessível por construção.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="img/logo/symbol.svg" type="image/svg+xml">
+<style>
+/* ────────── TOKENS ──────────
+   Herdados do brandbook (research/design-system/Inclusionista-Marca.dc.html, §03) e do protótipo da
+   Jornada. O trio do símbolo — verde, amarelo, azul — NÃO muda com o tema: ali o contraste que importa
+   é entre as três cores, não com a página. */
+:root {
+  --bg:#0B0D12; --surf:#14161F; --surf2:#1D2130;
+  --line:#262A38; --line2:#3A4054;
+  --text:#F2F4F8; --dim:#C6CCDA; --sub:#8F98AD;
+  --yellow:#FFDD1C; --yellowInk:#FFDD1C; --onAccent:#11131A;
+  --green:#12E87B; --blue:#3D97FF;
+  --barBg:rgba(11,13,18,0.82);
+  --marca-verde:#0B7A46; --marca-amarelo:#FFDD1C; --marca-azul:#2E5BFF;
+  --tap:44px;
+}
+:root[data-theme="light"] {
+  --bg:#F7F8FB; --surf:#FFFFFF; --surf2:#EEF1F7;
+  --line:#D3D9E6; --line2:#98A3BA;
+  --text:#11131A; --dim:#15181F; --sub:#242A35;
+  --yellow:#FFCE1F; --yellowInk:#7A5E00; --onAccent:#11131A;
+  --green:#0B7A46; --blue:#1B4FCC;
+  --barBg:rgba(247,248,251,0.88);
+}
+
+/* ⚠️ SEM GOOGLE FONTS, e é decisão e não esquecimento. O protótipo carrega cinco famílias de um
+   provedor externo, e o achado 04 do próprio Postmortem manda parar: «empacotar as fontes junto do
+   produto, com subsetting por idioma, e servir tudo do próprio servidor local». Até o produto ter
+   build que as empacote, esta página usa a pilha do sistema — que é pior de olhar e honesta sobre o
+   pilar 8, em vez de bonita e a puxar de fora. 📌 A dívida é a Jersey 15 do wordmark e a Atkinson
+   Hyperlegible do corpo. */
+* { box-sizing:border-box; }
+html { color-scheme:dark; }
+:root[data-theme="light"] { color-scheme:light; }
+body {
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:'Atkinson Hyperlegible','Lexend',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:17px; line-height:1.5;
+}
+h1,h2,h3 { font-family:'Jersey 15','Lexend',system-ui,sans-serif; font-weight:400; letter-spacing:.015em; line-height:1.05; }
+a { color:var(--blue); }
+/* ⚠️ REGRA DE UM PAPEL SÓ: `--yellow` PREENCHE, `--yellowInk` faz LINHA. No tema claro o amarelo de
+   preenchimento mede 1,3–1,5:1 contra toda superfície da página, logo uma borda ou um contorno feitos
+   com ele não desenham nada; `--yellowInk` mede 5,4–6,1:1 nas mesmas superfícies. No tema escuro as
+   duas são a mesma cor, então isto não muda lá. O `outline-offset` é a outra metade: com o anel
+   afastado 2 px, ele assenta sobre a PÁGINA e não sobre o botão amarelo — sem o afastamento, o foco
+   no botão primário seria amarelo sobre amarelo, 1:1, nos dois temas. */
+:focus-visible { outline:3px solid var(--yellowInk); outline-offset:2px; }
+
+/* Alvos de toque: piso de 44 px (WCAG 2.5.5), pela GEOMETRIA e não por um min-height solto. */
+button, .chip, .card a { min-height:var(--tap); }
+
+/* ────────── CABEÇALHO ────────── */
+header {
+  position:sticky; top:0; z-index:10; display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+  padding:14px 20px; border-bottom:1px solid var(--line);
+  background:var(--barBg); backdrop-filter:blur(10px);
+}
+.marca { display:flex; align-items:center; gap:12px; }
+.marca span { font-family:'Jersey 15','Lexend',system-ui,sans-serif; font-size:26px; letter-spacing:.02em; }
+.marca em { color:var(--yellowInk); font-style:normal; }
+.passos { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; font-size:14px; }
+.passos li { list-style:none; padding:6px 12px; border:1px solid var(--line); color:var(--sub); }
+/* ⚠️ A borda é `--yellowInk` e não `--yellow`, e a diferença só aparece no tema CLARO: ali o amarelo
+   de preenchimento mede 1,4:1 contra a página, de modo que uma pastilha amarela com borda amarela não
+   tem fronteira — o passo corrente ficava a apoiar-se em negrito e pouco mais. `--yellowInk` é a mesma
+   cor no tema escuro (nada muda lá) e ouro-escuro no claro: 5,8:1 da página e 4,1:1 do preenchimento,
+   acima do piso de 3:1 que a WCAG 1.4.11 pede para a fronteira de um componente. */
+.passos li[aria-current="step"] { background:var(--yellow); color:var(--onAccent); border-color:var(--yellowInk); font-weight:700; }
+header button {
+  padding:0 14px; background:var(--surf2); color:var(--text); border:1px solid var(--line2);
+  font:inherit; font-size:15px; font-weight:700; cursor:pointer;
+}
+
+/* ────────── LAYOUT ────────── */
+main { max-width:1100px; margin:0 auto; padding:28px 20px 80px; }
+.eyebrow { font-size:13px; letter-spacing:.09em; color:var(--yellowInk); margin:0 0 10px; text-transform:uppercase; }
+h1 { font-size:clamp(34px,6vw,64px); margin:0 0 16px; text-wrap:balance; }
+h2 { font-size:clamp(24px,4vw,34px); margin:0 0 8px; }
+.lede { font-size:19px; color:var(--dim); max-width:62ch; margin:0 0 28px; text-wrap:pretty; }
+.acoes { display:flex; gap:12px; flex-wrap:wrap; margin:26px 0 0; }
+.btn {
+  padding:0 20px; display:inline-flex; align-items:center; gap:8px;
+  background:var(--yellow); color:var(--onAccent); border:1px solid var(--yellowInk);
+  font:inherit; font-weight:700; font-size:16px; cursor:pointer;
+}
+.btn--quieto { background:transparent; color:var(--text); border-color:var(--line2); }
+.btn[disabled] { opacity:.5; cursor:not-allowed; }
+
+/* ────────── HABILIDADES ────────── */
+fieldset { border:1px solid var(--line); margin:0 0 20px; padding:18px 20px; background:var(--surf); }
+legend { font-size:14px; letter-spacing:.07em; color:var(--sub); padding:0 8px; text-transform:uppercase; }
+.filtros { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 18px; }
+.chip {
+  display:inline-flex; align-items:center; padding:0 14px; background:var(--surf2); color:var(--text);
+  border:1px solid var(--line2); font:inherit; font-size:15px; cursor:pointer;
+}
+.chip[aria-pressed="true"] { background:var(--blue); border-color:var(--blue); color:#fff; font-weight:700; }
+.habs { display:grid; gap:1px; background:var(--line); border:1px solid var(--line); }
+.hab { background:var(--surf); display:flex; gap:14px; padding:14px 16px; align-items:flex-start; cursor:pointer; }
+.hab:hover { background:var(--surf2); }
+.hab input { width:22px; height:22px; margin:2px 0 0; flex:none; accent-color:var(--blue); }
+.hab code { font-family:ui-monospace,monospace; font-size:14px; color:var(--yellowInk); font-weight:700; }
+.hab p { margin:4px 0 0; color:var(--dim); font-size:16px; }
+.hab small { color:var(--sub); font-size:13px; letter-spacing:.05em; }
+
+/* ────────── CARTÕES DE JOGO ────────── */
+.jogos { display:grid; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); gap:18px; }
+.card { background:var(--surf); border:1px solid var(--line); display:flex; flex-direction:column; }
+.card header { position:static; background:none; backdrop-filter:none; border:0; border-bottom:1px solid var(--line); padding:16px 18px; gap:12px; }
+.card .emoji { font-size:30px; line-height:1; }
+.card h3 { font-size:22px; margin:0; }
+.card .corpo { padding:16px 18px; flex:1; }
+.card p { margin:0 0 14px; color:var(--dim); font-size:16px; }
+.meta { display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--sub); letter-spacing:.04em; margin:0 0 14px; }
+.tags { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 6px; }
+.tag { font-family:ui-monospace,monospace; font-size:13px; padding:3px 8px; border:1px solid var(--line2); color:var(--dim); }
+.tag--trabalha { border-color:var(--green); color:var(--green); font-weight:700; }
+.tag--material { border-color:var(--line2); }
+.tag--fora { border-style:dashed; color:var(--sub); }
+.rotulo { font-size:12px; letter-spacing:.08em; color:var(--sub); text-transform:uppercase; margin:12px 0 4px; }
+.card footer { padding:14px 18px; border-top:1px solid var(--line); }
+
+/* ────────── ESTADO E AVISOS ────────── */
+.aviso { border-left:3px solid var(--yellowInk); background:var(--surf); padding:16px 18px; margin:0 0 24px; color:var(--dim); }
+.aviso strong { color:var(--text); }
+.vazio { border:1px dashed var(--line2); padding:26px; text-align:center; color:var(--sub); }
+footer.rodape { border-top:1px solid var(--line); margin-top:50px; padding:24px 20px; color:var(--sub); font-size:15px; }
+footer.rodape div { max-width:1100px; margin:0 auto; }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+@media (prefers-reduced-motion:reduce) { * { animation:none !important; transition:none !important; } }
+@media (max-width:600px) { .passos { width:100%; margin-left:0; } }
+</style>
+</head>
+<body>
+
+<a class="sr" href="#conteudo">Pular para o conteúdo</a>
+
+<header>
+  <div class="marca">
+    <svg width="34" height="34" viewBox="0 0 64 64" role="img" aria-label="Inclusionista">
+      <circle cx="32" cy="32" r="28" fill="var(--marca-verde)"></circle>
+      <rect x="26" y="12" width="12" height="40" fill="var(--marca-amarelo)"></rect>
+      <rect x="12" y="26" width="40" height="12" fill="var(--marca-amarelo)"></rect>
+      <rect x="26" y="26" width="12" height="12" fill="var(--marca-azul)"></rect>
+    </svg>
+    <span>inclusion<em>ista</em></span>
+  </div>
+  <ol class="passos" id="passos">
+    <li data-passo="1">1 · Habilidades</li>
+    <li data-passo="2">2 · O jogo</li>
+    <li data-passo="3">3 · Jogar</li>
+  </ol>
+  <button type="button" id="tema" aria-pressed="false">Tema claro</button>
+</header>
+
+<main id="conteudo">
+  <p class="sr" id="anuncio" role="status" aria-live="polite"></p>
+
+  <!-- ══════════ PASSO 1 ══════════ -->
+  <section id="p1" aria-labelledby="t1">
+    <p class="eyebrow">Base Nacional Comum Curricular</p>
+    <h1 id="t1" tabindex="-1">Todo mundo joga.<br><span style="color:var(--yellowInk)">Todo mundo aprende.</span></h1>
+    <p class="lede">
+      Escolha as habilidades que a aula precisa e o catálogo se estreita. Nada é salvo, nada sai desta
+      máquina — para brincar não há cadastro.
+    </p>
+
+    <div class="filtros" role="group" aria-label="Filtrar habilidades por componente">
+      <button type="button" class="chip" data-comp="all" aria-pressed="true">Todas</button>
+      <button type="button" class="chip" data-comp="mat" aria-pressed="false">Matemática</button>
+      <button type="button" class="chip" data-comp="ef" aria-pressed="false">Educação Física</button>
+    </div>
+
+    <fieldset>
+      <legend>Habilidades</legend>
+      <div class="habs" id="listaHabs"></div>
+    </fieldset>
+
+    <div class="acoes">
+      <button type="button" class="btn" id="irP2">Ver os jogos</button>
+      <button type="button" class="btn btn--quieto" id="verTodos">Ver todos os sete, sem filtrar</button>
+    </div>
+  </section>
+
+  <!-- ══════════ PASSO 2 ══════════ -->
+  <section id="p2" hidden aria-labelledby="t2">
+    <p class="eyebrow">Passo 2</p>
+    <h2 id="t2" tabindex="-1">Escolha o jogo</h2>
+    <p class="lede" id="resumoFiltro"></p>
+    <div id="lacuna"></div>
+    <div class="jogos" id="listaJogos"></div>
+    <div class="acoes">
+      <button type="button" class="btn btn--quieto" id="voltarP1">Voltar às habilidades</button>
+    </div>
+  </section>
+
+  <!-- ══════════ PASSO 3 ══════════ -->
+  <section id="p3" hidden aria-labelledby="t3">
+    <p class="eyebrow">Passo 3</p>
+    <h2 id="t3" tabindex="-1">Jogar</h2>
+    <div id="palco"></div>
+    <div class="acoes">
+      <button type="button" class="btn btn--quieto" id="voltarP2">Voltar ao catálogo</button>
+    </div>
+  </section>
+</main>
+
+<footer class="rodape">
+  <div>
+    <p>
+      <strong>Esta é uma demonstração.</strong> Os sete jogos existem e são jogáveis nos seus próprios
+      repositórios; o que ainda não existe é a entrega — o manifesto que diz quais jogos e quais versões
+      entram numa versão, e a publicação de cada um como cartucho. Enquanto isso, o passo 3 diz o que
+      falta em vez de fingir que carrega.
+    </p>
+    <p>
+      Código sob <strong>AGPL-3.0-or-later</strong>. A arte não é AGPL. A titularidade patrimonial é do
+      Município. · <a href="identidade.html">A identidade visual, em estudo de caso</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+/* ──────────────────────────────────────────────────────────────────────────────
+ * A JORNADA ENXUTA: habilidades → jogo → jogar.
+ *
+ * ⚠️ Sem framework e sem build, de propósito: este repositório ainda não tem toolchain (o README diz
+ * isso), e uma página que depende de um build que não existe não abre. Quando o build chegar com o
+ * manifesto, isto vira o casco acessível do ADR-0036 e os cartuchos entram por `import()`.
+ *
+ * 📌 As três telas são ESTADO, não navegação: o ADR-0048 §1 diz que sem login não há tela de avatar e
+ * a jornada vai direto da habilidade ao jogo. É essa a forma construída aqui.
+ * ────────────────────────────────────────────────────────────────────────────── */
+(() => {
+  'use strict';
+
+  const $ = (s) => document.querySelector(s);
+  const anuncio = $('#anuncio');
+  const diga = (t) => { anuncio.textContent = t; };
+
+  let dados = null;
+  let compAtivo = 'all';
+  const escolhidas = new Set();
+  let jogoAtual = null;
+
+  /* ── tema ───────────────────────────────────────────────────────────────── */
+  const btnTema = $('#tema');
+  btnTema.addEventListener('click', () => {
+    const claro = document.documentElement.dataset.theme === 'light';
+    document.documentElement.dataset.theme = claro ? 'dark' : 'light';
+    btnTema.textContent = claro ? 'Tema claro' : 'Tema escuro';
+    btnTema.setAttribute('aria-pressed', String(!claro));
+    try { localStorage.setItem('incl-tema', claro ? 'dark' : 'light'); } catch (e) { /* sem storage, sem drama */ }
+  });
+  try {
+    const g = localStorage.getItem('incl-tema');
+    if (g) {
+      document.documentElement.dataset.theme = g;
+      btnTema.textContent = g === 'light' ? 'Tema escuro' : 'Tema claro';
+      btnTema.setAttribute('aria-pressed', String(g === 'light'));
+    }
+  } catch (e) { /* idem */ }
+
+  /* ── passos ─────────────────────────────────────────────────────────────── */
+  function irPara(n) {
+    for (const p of [1, 2, 3]) $('#p' + p).hidden = (p !== n);
+    for (const li of $('#passos').children) {
+      if (Number(li.dataset.passo) === n) li.setAttribute('aria-current', 'step');
+      else li.removeAttribute('aria-current');
+    }
+    // O foco vai para o título do passo: quem navega por teclado ou leitor de tela tem de saber que a
+    // tela mudou, e um `hidden` trocado em silêncio não conta isso a ninguém.
+    const titulo = $('#p' + n).querySelector('h1,h2');
+    if (titulo) titulo.focus();
+  }
+
+  /* ── passo 1: habilidades ───────────────────────────────────────────────── */
+  function desenhaHabilidades() {
+    const alvo = $('#listaHabs');
+    const lista = dados.skills.filter((s) => compAtivo === 'all' || s.component === compAtivo);
+    alvo.textContent = '';
+    for (const s of lista) {
+      const lab = document.createElement('label');
+      lab.className = 'hab';
+      const inp = document.createElement('input');
+      inp.type = 'checkbox';
+      inp.value = s.code;
+      inp.checked = escolhidas.has(s.code);
+      inp.addEventListener('change', () => {
+        if (inp.checked) escolhidas.add(s.code); else escolhidas.delete(s.code);
+        atualizaBotao();
+        diga(escolhidas.size === 0 ? 'Nenhuma habilidade escolhida'
+          : escolhidas.size === 1 ? '1 habilidade escolhida'
+          : escolhidas.size + ' habilidades escolhidas');
+      });
+      const txt = document.createElement('div');
+      const code = document.createElement('code');
+      code.textContent = s.code;
+      const banda = document.createElement('small');
+      banda.textContent = ' · ' + s.band;
+      const p = document.createElement('p');
+      p.textContent = s.text;
+      txt.append(code, banda, p);
+      lab.append(inp, txt);
+      alvo.append(lab);
+    }
+    if (!lista.length) alvo.innerHTML = '<p class="vazio">Nenhuma habilidade neste componente.</p>';
+  }
+
+  function atualizaBotao() {
+    const b = $('#irP2');
+    b.textContent = escolhidas.size ? 'Ver os jogos (' + escolhidas.size + ')' : 'Ver os jogos';
+  }
+
+  for (const c of document.querySelectorAll('.chip[data-comp]')) {
+    c.addEventListener('click', () => {
+      compAtivo = c.dataset.comp;
+      for (const o of document.querySelectorAll('.chip[data-comp]')) {
+        o.setAttribute('aria-pressed', String(o === c));
+      }
+      desenhaHabilidades();
+      diga('Filtro: ' + c.textContent);
+    });
+  }
+
+  /* ── passo 2: catálogo ──────────────────────────────────────────────────── */
+  const etiquetasDe = (g) => ({
+    trabalha: g.bncc.works || [],
+    material: g.bncc.material || [],
+    previstas: g.bncc.planned || [],
+  });
+
+  function cobre(g) {
+    const t = etiquetasDe(g);
+    const todas = new Set([...t.trabalha, ...t.material]);
+    return [...escolhidas].filter((c) => todas.has(c));
+  }
+
+  function desenhaJogos() {
+    const alvo = $('#listaJogos');
+    alvo.textContent = '';
+    const sel = escolhidas.size > 0;
+    const lista = sel ? dados.games.filter((g) => cobre(g).length) : dados.games;
+
+    $('#resumoFiltro').textContent = sel
+      ? 'Sete jogos no catálogo; '
+        + (lista.length === 0 ? 'nenhum atende' : lista.length === 1 ? '1 atende' : lista.length + ' atendem') + ' '
+        + (escolhidas.size === 1 ? 'à habilidade marcada' : 'ao menos uma das ' + escolhidas.size + ' habilidades marcadas') + '.'
+      : 'Os sete jogos da versão de demonstração.';
+
+    // A LACUNA, e ela é do achado 02 do Postmortem: marcar quatro habilidades e receber uma lista sem
+    // dizer o que ficou de fora obriga o professor a abrir tudo para descobrir. Melhor dizer.
+    const lacuna = $('#lacuna');
+    lacuna.textContent = '';
+    if (sel) {
+      const atendidas = new Set(lista.flatMap((g) => cobre(g)));
+      const orfas = [...escolhidas].filter((c) => !atendidas.has(c));
+      if (orfas.length) {
+        const d = document.createElement('p');
+        d.className = 'aviso';
+        d.innerHTML = '<strong>Nenhum jogo cobre ' + (orfas.length === 1 ? 'esta habilidade' : 'estas habilidades')
+          + ':</strong> ' + orfas.join(', ') + '. Isso é o catálogo a dizer o que não tem, e não um defeito da busca.';
+        lacuna.append(d);
+      }
+    }
+
+    if (!lista.length) {
+      alvo.innerHTML = '<p class="vazio">Nenhum dos sete jogos atende '
+        + (escolhidas.size === 1 ? 'à habilidade marcada' : 'às habilidades marcadas') + '.</p>';
+      return;
+    }
+
+    for (const g of lista) {
+      const t = etiquetasDe(g);
+      const card = document.createElement('article');
+      card.className = 'card';
+
+      const cab = document.createElement('header');
+      cab.innerHTML = '<span class="emoji" aria-hidden="true">' + g.emoji + '</span>';
+      const h3 = document.createElement('h3');
+      h3.textContent = g.name.pt;
+      cab.append(h3);
+
+      const corpo = document.createElement('div');
+      corpo.className = 'corpo';
+      const p = document.createElement('p');
+      p.textContent = g.desc.pt;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = g.genre.pt + ' · ' + g.players;
+      corpo.append(p, meta);
+
+      const põe = (rotulo, codigos, classe) => {
+        if (!codigos.length) return;
+        const r = document.createElement('p');
+        r.className = 'rotulo';
+        r.textContent = rotulo;
+        const box = document.createElement('div');
+        box.className = 'tags';
+        for (const c of codigos) {
+          const s = document.createElement('span');
+          s.className = 'tag ' + classe;
+          s.textContent = c;
+          s.title = (dados.skills.find((k) => k.code === c) || {}).text || '';
+          box.append(s);
+        }
+        corpo.append(r, box);
+      };
+      põe('Trabalha', t.trabalha, 'tag--trabalha');
+      põe('Serve de material para', t.material, 'tag--material');
+      põe('Quando o editor existir', t.previstas, 'tag--fora');
+
+      const pe = document.createElement('footer');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn';
+      btn.textContent = 'Jogar';
+      btn.addEventListener('click', () => { jogoAtual = g; desenhaPalco(); irPara(3); });
+      pe.append(btn);
+
+      card.append(cab, corpo, pe);
+      alvo.append(card);
+    }
+  }
+
+  /* ── passo 3: o palco, e a verdade sobre ele ────────────────────────────── */
+  function desenhaPalco() {
+    const g = jogoAtual;
+    const alvo = $('#palco');
+    alvo.textContent = '';
+    const d = document.createElement('div');
+    d.className = 'aviso';
+    d.innerHTML =
+      '<p><strong>' + g.name.pt + ' ainda não entra nesta entrega.</strong> O jogo existe e é jogável — '
+      + 'ele vive em <code>' + g.repo + '</code> — mas nenhum dos sete está publicado como cartucho, e '
+      + 'o manifesto que escolhe quais entram numa versão ainda não foi escrito.</p>'
+      + '<p>Esta tela diz isso em vez de mostrar uma moldura vazia. Quando o manifesto existir, é aqui '
+      + 'que o cartucho entra, nesta mesma página e na mesma origem — sem aba nova e sem iframe.</p>';
+    alvo.append(d);
+    diga(g.name.pt + ': cartucho ainda não publicado.');
+  }
+
+  /* ── ligações ───────────────────────────────────────────────────────────── */
+  $('#irP2').addEventListener('click', () => { desenhaJogos(); irPara(2); });
+  $('#verTodos').addEventListener('click', () => {
+    escolhidas.clear();
+    atualizaBotao();
+    desenhaHabilidades();
+    desenhaJogos();
+    irPara(2);
+  });
+  $('#voltarP1').addEventListener('click', () => irPara(1));
+  $('#voltarP2').addEventListener('click', () => irPara(2));
+
+  /* ── arranque ───────────────────────────────────────────────────────────── */
+  fetch('data/games.json')
+    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then((j) => {
+      dados = j;
+      desenhaHabilidades();
+      atualizaBotao();
+      irPara(1);
+    })
+    .catch((e) => {
+      // ⚠️ FALHA VISÍVEL, e não console. Quem abre esta página com `file://` não tem `fetch` de ficheiro
+      // local, e uma tela em branco leria como produto partido em vez de como página servida errado.
+      $('#listaHabs').innerHTML = '<p class="vazio">Não consegui ler <code>data/games.json</code> ('
+        + e.message + '). Esta página precisa de ser servida por HTTP — abrir o ficheiro direto no '
+        + 'navegador não deixa o navegador buscar o catálogo.</p>';
+    });
+})();
+</script>
+</body>
+</html>
