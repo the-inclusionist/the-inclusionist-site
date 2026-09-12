@@ -20,3 +20,8 @@ Thumbs.db
 
 # SDD scratch (ledger, briefs, review packages) — never versioned
 .superpowers/
+
+# the prototype canvases — design fiction, kept locally, never versioned
+# (they are the brand authority and the source the pages were written FROM, but no page loads
+#  them, and their curriculum data is unverified: nothing downstream may treat them as a source)
+research/
