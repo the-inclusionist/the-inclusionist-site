@@ -22,7 +22,20 @@ which will hold everything the official site will hold.
 | `identidade.html` | The visual identity as a case study: symbol, colour, typography and geometry, with the contrast ratios **computed in the page itself** from the tokens that paint it. |
 | `404.html` | The 404, which is also the mechanism: Cloudflare Pages serves this file with status 404 for any path that matches no asset. |
 | `img/` | The assets the pages serve: the logo SVG set in `img/logo/`, and the 404 image. |
-| `research/` | The brand, design-system, journey and postmortem prototype canvases. ⚠️ They are *design fiction*: no page loads them, and the curriculum data in them is **not verified**. |
+
+### The prototype canvases are gone, and that is deliberate
+
+`research/` held the brand, design-system, journey and postmortem canvases. It has been **deleted and
+gitignored**. They were the brand authority and the source these pages were written *from*, but they are
+*design fiction*: no page ever loaded them, their curriculum data is **not verified**, and shipping them
+at a public demonstration address would publish unchecked BNCC text next to a real product.
+
+So the versioned account of the identity is now `identidade.html` alone — which is why it **computes**
+what it claims from the tokens that paint it, instead of transcribing numbers from a canvas that is no
+longer here to be checked against.
+
+They are still readable from the history when one is needed:
+`git show fa4ec2e:research/design-system/Inclusionista-Marca.dc.html`.
 | `docs/` | Hosting, architecture, the cartridge contract, the journey and the BNCC tags — documents that **cite** the records rather than containing them. |
 
 ⚠️ **What is still missing: the manifest.** It is the centrepiece of the new role — game, version, and why

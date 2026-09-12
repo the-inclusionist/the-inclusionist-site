@@ -1,8 +1,13 @@
 # Inclusionista logo — SVG set
 
-Extracted from the brandbook canvas, `research/design-system/Inclusionista-Marca.dc.html`,
-section **02 · Logo**, which remains the authority. If the two ever disagree, the canvas wins
-and these files are stale.
+Extracted from the brandbook canvas (`Inclusionista-Marca.dc.html`), section **02 · Logo**.
+
+⚠️ **That canvas no longer exists here.** `research/` was deleted and gitignored — the canvases are
+design fiction with unverified curriculum data, and must not ship to a public address. They survive in
+the pushed history, in `fa4ec2e`.
+
+So **these SVGs are now the artifact**, not a copy of one. There is no upstream left to re-derive them
+from without going into the history, which means a change here is a change to the mark itself.
 
 ## Files
 
