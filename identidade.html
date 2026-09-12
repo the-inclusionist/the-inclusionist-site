@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  THE VISUAL IDENTITY, AS A CASE STUDY.
+
+  Based on research/design-system/Inclusionista-Design-System.dc.html and Inclusionista-Marca.dc.html,
+  which remain the authority on what the identity IS. This page is not a copy of them: it is the account
+  of what happened when that identity met a page that has to load on a school's connection, and it says
+  where the two disagree.
+
+  Content is pt-BR because this is product surface; comments are English (ADR-0064 house rule).
+
+  ⚠️ THE CONTRAST NUMBERS ON THIS PAGE ARE COMPUTED AT RUNTIME from the very tokens the page uses, by
+  the WCAG 2.x relative-luminance formula. They are not transcribed. This is deliberate: the brandbook
+  states seven ratios and five of them are wrong, and the only way a number stops drifting from the
+  colour it describes is to stop being a separate fact.
+-->
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A identidade visual, em estudo de caso · Inclusionista</title>
+<meta name="description" content="O símbolo, a cor, a tipografia e a geometria do Inclusionista — o que a marca decide, o que esta entrega usa, e onde os dois divergem.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="img/logo/symbol.svg" type="image/svg+xml">
+<style>
+/* ────────── TOKENS ────────── os mesmos do index.html, e de propósito: um estudo de caso da identidade
+   que usasse outra paleta seria uma peça sobre si mesmo e não sobre o produto. */
+:root {
+  --bg:#0B0D12; --surf:#14161F; --surf2:#1D2130;
+  --line:#262A38; --line2:#3A4054;
+  --text:#F2F4F8; --dim:#C6CCDA; --sub:#8F98AD;
+  --yellow:#FFDD1C; --yellowInk:#FFDD1C; --onAccent:#11131A;
+  --green:#12E87B; --blue:#3D97FF; --error:#FF8A7A;
+  --barBg:rgba(11,13,18,0.82);
+  --marca-verde:#0B7A46; --marca-amarelo:#FFDD1C; --marca-azul:#2E5BFF;
+  --tap:44px;
+}
+:root[data-theme="light"] {
+  --bg:#F7F8FB; --surf:#FFFFFF; --surf2:#EEF1F7;
+  --line:#D3D9E6; --line2:#98A3BA;
+  --text:#11131A; --dim:#15181F; --sub:#242A35;
+  --yellow:#FFCE1F; --yellowInk:#7A5E00; --onAccent:#11131A;
+  --green:#0B7A46; --blue:#1B4FCC; --error:#B3261E;
+  --barBg:rgba(247,248,251,0.88);
+}
+
+/* ⚠️ SEM GOOGLE FONTS — e esta página é o sítio onde essa decisão é explicada, não só obedecida.
+   Ver a secção 03. */
+* { box-sizing:border-box; }
+html { color-scheme:dark; }
+:root[data-theme="light"] { color-scheme:light; }
+body {
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:'Atkinson Hyperlegible','Lexend',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:17px; line-height:1.6;
+}
+h1,h2,h3 { font-family:'Jersey 15','Lexend',system-ui,sans-serif; font-weight:400; letter-spacing:.015em; line-height:1.05; }
+p { max-width:70ch; }
+a { color:var(--blue); }
+/* ⚠️ `--yellow` PREENCHE, `--yellowInk` faz LINHA — a regra está medida e explicada na secção 02. */
+:focus-visible { outline:3px solid var(--yellowInk); outline-offset:2px; }
+code { font-family:ui-monospace,'Cascadia Mono','Consolas',monospace; font-size:.92em; color:var(--blue); }
+
+.pular {
+  position:absolute; left:-9999px; top:0; z-index:20; padding:12px 18px;
+  background:var(--yellow); color:var(--onAccent); font-weight:700; text-decoration:none;
+}
+.pular:focus { left:0; }
+
+/* ────────── CABEÇALHO ────────── */
+header {
+  position:sticky; top:0; z-index:10; display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+  padding:14px 20px; border-bottom:1px solid var(--line);
+  background:var(--barBg); backdrop-filter:blur(10px);
+}
+.marca { display:flex; align-items:center; gap:12px; text-decoration:none; color:inherit; }
+.marca span { font-family:'Jersey 15','Lexend',system-ui,sans-serif; font-size:26px; letter-spacing:.02em; }
+.marca em { color:var(--yellowInk); font-style:normal; }
+header nav { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+header nav a, header button {
+  min-height:var(--tap); display:inline-flex; align-items:center; padding:0 14px;
+  background:var(--surf2); color:var(--text); border:1px solid var(--line2);
+  font:inherit; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer;
+}
+header nav a[aria-current="page"] { background:var(--yellow); color:var(--onAccent); border-color:var(--yellowInk); }
+
+/* ────────── ESTRUTURA ────────── grade de 1160 px, a mesma do design system */
+.faixa { max-width:1160px; margin:0 auto; padding:0 20px; }
+.hero { padding:64px 20px 44px; }
+.hero .olho { font-size:14px; letter-spacing:.09em; color:var(--yellowInk); margin:0 0 18px; text-transform:uppercase; }
+.hero h1 { font-size:clamp(38px,6vw,72px); margin:0 0 20px; }
+.hero p { font-size:21px; color:var(--dim); max-width:64ch; }
+
+section.bloco { padding:0 20px 68px; max-width:1160px; margin:0 auto; }
+.titulo {
+  display:flex; align-items:baseline; gap:20px; flex-wrap:wrap;
+  border-bottom:2px solid var(--text); padding-bottom:12px; margin-bottom:26px;
+}
+.titulo h2 { font-size:30px; margin:0; }
+.titulo .selo { margin-left:auto; font-size:14px; letter-spacing:.07em; color:var(--green); }
+
+/* Malha de cartões: gap de 1 px sobre a linha — «a malha do fliperama» do §07 do design system. */
+.malha {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+  gap:1px; background:var(--line); border:1px solid var(--line);
+}
+.malha > * { background:var(--surf); padding:22px; margin:0; }
+
+.nota { font-size:16px; color:var(--sub); margin:14px 0 0; }
+.achado {
+  border:1px solid var(--line2); border-left:5px solid var(--yellowInk);
+  background:var(--surf); padding:18px 20px; margin:22px 0 0;
+}
+.achado h3 { font-size:21px; margin:0 0 10px; }
+.achado p { margin:0 0 .9em; color:var(--dim); }
+.achado p:last-child { margin-bottom:0; }
+
+/* ────────── 01 · SÍMBOLO ────────── */
+.reducoes { display:flex; align-items:flex-end; gap:28px; flex-wrap:wrap; padding:26px; background:var(--surf); border:1px solid var(--line); }
+.reducoes figure { margin:0; text-align:center; }
+.reducoes figcaption { font-size:13px; color:var(--sub); margin-top:10px; letter-spacing:.06em; }
+.cinza { filter:grayscale(1); }
+
+/* ────────── 02 · COR ────────── */
+.amostras { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); }
+.amostra { background:var(--surf); padding:0; }
+.amostra .chapa { height:76px; display:flex; align-items:flex-end; padding:8px 12px; font-size:14px; font-weight:700; }
+.amostra .corpo { padding:14px; }
+.amostra b { display:block; font-size:16px; }
+.amostra code { display:block; margin:4px 0 8px; color:var(--sub); }
+.amostra .razao { font-size:15px; color:var(--dim); }
+.amostra .razao strong { color:var(--text); font-size:19px; }
+.passa { color:var(--green); font-weight:700; }
+.falha { color:var(--error); font-weight:700; }
+
+/* ────────── 05 · TRÊS SINAIS ────────── */
+.demo { display:flex; gap:14px; flex-wrap:wrap; padding:24px; background:var(--surf); border:1px solid var(--line); }
+.sinal {
+  min-height:var(--tap); display:inline-flex; align-items:center; gap:10px;
+  padding:8px 16px; border:2px solid var(--line2); background:transparent;
+  color:var(--text); font:inherit; font-size:16px; cursor:pointer;
+}
+.sinal .marca-ok { width:1.1em; display:inline-block; }
+.sinal[aria-pressed="true"] {
+  border-width:4px; border-color:var(--yellowInk); background:var(--surf2); font-weight:700;
+}
+
+/* ────────── TABELA DO BALANÇO ────────── */
+.balanco { width:100%; border-collapse:collapse; font-size:16px; }
+.balanco th, .balanco td { text-align:left; padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+.balanco th { color:var(--sub); font-size:14px; letter-spacing:.07em; text-transform:uppercase; font-weight:700; }
+.balanco tbody tr:last-child td { border-bottom:0; }
+.rolagem { overflow-x:auto; border:1px solid var(--line); background:var(--surf); }
+.usa::before { content:"● "; color:var(--green); }
+.spec::before { content:"○ "; color:var(--sub); }
+
+footer {
+  border-top:1px solid var(--line); margin-top:20px; padding:28px 20px 44px;
+  color:var(--sub); font-size:15px;
+}
+footer .faixa > p { margin:0 0 10px; }
+</style>
+</head>
+<body>
+<a class="pular" href="#conteudo">Pular para o conteúdo</a>
+
+<header>
+  <a class="marca" href="index.html">
+    <svg width="34" height="34" viewBox="0 0 64 64" role="img" aria-label="Inclusionista">
+      <circle cx="32" cy="32" r="28" fill="#0B7A46"></circle>
+      <rect x="26" y="12" width="12" height="40" fill="#FFDD1C"></rect>
+      <rect x="12" y="26" width="40" height="12" fill="#FFDD1C"></rect>
+      <rect x="26" y="26" width="12" height="12" fill="#2E5BFF"></rect>
+    </svg>
+    <span>inclusion<em>ista</em></span>
+  </a>
+  <nav>
+    <a href="index.html">A jornada</a>
+    <a href="identidade.html" aria-current="page">Identidade</a>
+    <button type="button" id="tema">Tema claro</button>
+  </nav>
+</header>
+
+<main id="conteudo">
+
+  <div class="hero faixa">
+    <p class="olho">Estudo de caso</p>
+    <h1>A identidade visual</h1>
+    <p>
+      O brandbook e o design system decidem o que a identidade <strong>é</strong>. Esta página conta o que
+      aconteceu quando ela encontrou uma entrega real — uma página que tem de abrir na ligação de uma escola
+      pública, sem build, sem CDN e sem servidor. É por isso que ela nomeia também as três coisas em que a
+      especificação e o produto discordam, em vez de mostrar só as que combinam.
+    </p>
+  </div>
+
+  <!-- ─────────────────────────── 01 ─────────────────────────── -->
+  <section class="bloco">
+    <div class="titulo">
+      <h2>01 · O símbolo</h2>
+      <span class="selo">uma peça, três aplicações</span>
+    </div>
+
+    <p>
+      O símbolo é o botão de ação: círculo verde, cruz amarela vazada, núcleo azul. Soma, mira e direção na
+      mesma forma, tudo em grade de 8&nbsp;px — o mesmo módulo do pixel art. Ele tem <strong>um</strong>
+      ficheiro, não dois: o trio é exclusivo do símbolo e não muda com o tema, porque ali o contraste que
+      importa é entre as três cores, não com a página. Só o wordmark troca de cor com a superfície.
+    </p>
+
+    <div class="reducoes">
+      <figure>
+        <svg width="96" height="96" viewBox="0 0 64 64" role="img" aria-label="Símbolo do Inclusionista a 96 pixels">
+          <circle cx="32" cy="32" r="28" fill="#0B7A46"></circle>
+          <rect x="26" y="12" width="12" height="40" fill="#FFDD1C"></rect>
+          <rect x="12" y="26" width="40" height="12" fill="#FFDD1C"></rect>
+          <rect x="26" y="26" width="12" height="12" fill="#2E5BFF"></rect>
+        </svg>
+        <figcaption>96 px</figcaption>
+      </figure>
+      <figure>
+        <svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Símbolo a 64 pixels">
+          <circle cx="32" cy="32" r="28" fill="#0B7A46"></circle>
+          <rect x="26" y="12" width="12" height="40" fill="#FFDD1C"></rect>
+          <rect x="12" y="26" width="40" height="12" fill="#FFDD1C"></rect>
+          <rect x="26" y="26" width="12" height="12" fill="#2E5BFF"></rect>
+        </svg>
+        <figcaption>64 px</figcaption>
+      </figure>
+      <figure>
+        <svg width="32" height="32" viewBox="0 0 64 64" role="img" aria-label="Símbolo a 32 pixels">
+          <circle cx="32" cy="32" r="28" fill="#0B7A46"></circle>
+          <rect x="26" y="12" width="12" height="40" fill="#FFDD1C"></rect>
+          <rect x="12" y="26" width="40" height="12" fill="#FFDD1C"></rect>
+          <rect x="26" y="26" width="12" height="12" fill="#2E5BFF"></rect>
+        </svg>
+        <figcaption>32 px</figcaption>
+      </figure>
+      <figure>
+        <svg width="16" height="16" viewBox="0 0 64 64" role="img" aria-label="Símbolo a 16 pixels, o tamanho mínimo">
+          <circle cx="32" cy="32" r="28" fill="#0B7A46"></circle>
+          <rect x="26" y="12" width="12" height="40" fill="#FFDD1C"></rect>
+          <rect x="12" y="26" width="40" height="12" fill="#FFDD1C"></rect>
+          <rect x="26" y="26" width="12" height="12" fill="#2E5BFF"></rect>
+        </svg>
+        <figcaption>16 px · mínimo</figcaption>
+      </figure>
+      <figure>
+        <svg class="cinza" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="O mesmo símbolo convertido para escala de cinza">
+          <circle cx="32" cy="32" r="28" fill="#0B7A46"></circle>
+          <rect x="26" y="12" width="12" height="40" fill="#FFDD1C"></rect>
+          <rect x="12" y="26" width="40" height="12" fill="#FFDD1C"></rect>
+          <rect x="26" y="26" width="12" height="12" fill="#2E5BFF"></rect>
+        </svg>
+        <figcaption>em cinza</figcaption>
+      </figure>
+    </div>
+
+    <div class="achado">
+      <h3>🔴 O símbolo está certo. A razão escrita não está.</h3>
+      <p>
+        O brandbook justifica o trio dizendo que as três matizes «ficam distantes entre si e distantes em
+        luminosidade — continuam distinguíveis em escala de cinza, em deuteranopia e em protanopia».
+        Medido: o verde <code>#0B7A46</code> e o azul <code>#2E5BFF</code> dão
+        <strong id="razaoVA">—</strong>. São a <em>mesma</em> luminosidade. Em cinza são o mesmo cinzento,
+        e a peça ao lado mostra isso.
+      </p>
+      <p>
+        A peça sobrevive — mas por outro motivo. Na geometria, o azul ocupa
+        <code>x&nbsp;26–38, y&nbsp;26–38</code>, e as duas barras amarelas cobrem <code>y&nbsp;12–52</code> e
+        <code>x&nbsp;12–52</code>: <strong>o azul nunca encosta no verde</strong>. A cruz amarela separa-os
+        nos quatro lados, a <span id="razaoAV">—</span> do verde e <span id="razaoAA">—</span> do azul, ambas
+        acima do piso de 3:1 que a WCAG 1.4.11 pede para objeto gráfico. O que segura o símbolo em cinza e
+        em daltonismo é a <strong>cruz</strong>, não a distância de luminosidade entre verde e azul.
+      </p>
+      <p class="nota">
+        Consequência prática, e é a única que importa: <strong>nunca pôr verde e azul da marca em contacto
+        direto</strong> — nem num gráfico, nem num ícone novo, nem num estado de interface. Fora do símbolo,
+        o amarelo não estará lá para os separar.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── 02 ─────────────────────────── -->
+  <section class="bloco">
+    <div class="titulo">
+      <h2>02 · A cor</h2>
+      <span class="selo">razões calculadas nesta página</span>
+    </div>
+
+    <p>
+      Verde, amarelo e azul da bandeira, empurrados para o registo neon do fliperama. Amarelo é marca e
+      destaque; o azul-cheio é ação e foco, e a sua versão neon carrega ligações, códigos e rótulos; o verde
+      carrega confirmação e progresso. <strong>Cor nunca é o único portador de informação</strong> — a secção
+      05 demonstra a regra em funcionamento.
+    </p>
+
+    <div class="amostras" id="amostras"></div>
+
+    <p class="nota">
+      ⚠️ Os números acima são calculados no instante em que esta página abre, lendo os próprios tokens CSS
+      que a pintam, pela fórmula de luminância relativa da WCAG&nbsp;2. Não foram transcritos de lado nenhum.
+      A razão é concreta: o brandbook afirma sete razões e <strong>cinco divergem do medido</strong> — quatro
+      para melhor, e o verde neon para pior (diz 13,1:1, mede 11,9:1). Um número que vive noutro ficheiro que
+      a cor envelhece sem avisar; um número derivado da cor não pode.
+    </p>
+
+    <div class="achado">
+      <h3>🟡 O amarelo tem dois papéis, e eu tinha-os colapsado num só</h3>
+      <p>
+        O conjunto de tokens do protótipo traz <code>--yellow</code> <em>e</em> <code>--yellowLine</code> /
+        <code>--yellowInk</code>. Ao trazer a paleta para esta entrega eu fundi-os, e a distinção parecia
+        redundante — no tema escuro as duas <em>são</em> a mesma cor. Foi esta página, ao medir-se a si
+        própria, que mostrou porque não são.
+      </p>
+      <p>
+        No tema claro, o amarelo de preenchimento mede
+        <strong>1,4:1 contra a página, 1,5:1 contra a superfície e 1,3:1 contra a superfície&nbsp;2</strong>.
+        Ou seja: uma borda amarela num fundo claro <em>não desenha linha nenhuma</em>. O efeito estava em
+        quatro sítios — a pastilha do passo corrente, o botão primário, a barra do aviso e o estado
+        selecionado do chip — e no pior deles, a pastilha, o «passo em que você está» ficava a apoiar-se
+        em negrito e pouco mais. <code>--yellowInk</code> mede 5,4 a 6,1:1 nas mesmas superfícies.
+      </p>
+      <p>
+        Sobrava um caso que <strong>nenhuma cor resolve</strong>: o anel de foco à volta do botão primário
+        é amarelo sobre amarelo, 1,0:1, nos dois temas. Esse resolve-se por geometria e não por paleta —
+        <code>outline-offset:2px</code> afasta o anel do botão e assenta-o sobre a página, onde ele mede
+        14,4:1 no escuro e 5,8:1 no claro.
+      </p>
+      <p class="nota">
+        A regra que fica, e cabe numa frase: <strong><code>--yellow</code> preenche,
+        <code>--yellowInk</code> faz linha.</strong> Toda borda, fronteira e contorno usam o segundo.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── 03 ─────────────────────────── -->
+  <section class="bloco">
+    <div class="titulo">
+      <h2>03 · A tipografia</h2>
+      <span class="selo">a divergência maior</span>
+    </div>
+
+    <p>
+      A especificação fixa quatro famílias em todo locale — <strong>Jersey&nbsp;15</strong> para display,
+      logotipo e placar; <strong>Lexend</strong> para rótulos curtos e códigos BNCC;
+      <strong>Atkinson&nbsp;Hyperlegible</strong> para todo o texto corrido, porque diferencia as letras
+      ambíguas (<code>I l 1</code>, <code>O 0</code>, <code>b d p q</code>); e <strong>Andika</strong> para
+      leitor iniciante, ligada sozinha no perfil de 1º a 5º ano — mais uma quinta, regionalizada: a
+      <strong>Playwrite</strong> do país, que é a única fonte que muda com o locale, porque a forma das
+      letras cursivas ensinada na escola muda de país para país.
+    </p>
+
+    <div class="achado">
+      <h3>Esta página não carrega nenhuma delas. É decisão, não esquecimento.</h3>
+      <p>
+        O protótipo puxa cinco famílias de um provedor externo. O achado 04 do próprio Postmortem manda
+        parar, e o brandbook concorda consigo mesmo na secção da tipografia: «em produção as fontes são
+        empacotadas com o produto e servidas pelo próprio servidor local, com subsetting por idioma — nada de
+        CDN, porque a promessa de funcionar sem internet vale também para a tipografia, e dado de aluno não
+        deve sair da rede da escola».
+      </p>
+      <p>
+        Uma página que promete funcionar offline e pede a letra a um terceiro já quebrou a promessa antes de
+        desenhar o primeiro botão — e quebra-a de forma invisível, porque na máquina do programador a fonte
+        está em cache. Então esta entrega usa a pilha do sistema: <em>pior de olhar, e honesta</em>.
+      </p>
+      <p class="nota">
+        📌 <strong>A dívida, nomeada:</strong> a Jersey&nbsp;15 do wordmark e a Atkinson&nbsp;Hyperlegible do
+        corpo voltam no dia em que houver passo de build que as empacote com subsetting. O wordmark do
+        cabeçalho já contorna: os ficheiros em <code>img/logo/</code> trazem a Jersey&nbsp;15 convertida
+        em contornos, sem <code>@font-face</code> nenhum. O custo é o de sempre — ali o texto deixou de ser
+        texto, e muda-se regenerando, não editando.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── 04 ─────────────────────────── -->
+  <section class="bloco">
+    <div class="titulo">
+      <h2>04 · A geometria</h2>
+      <span class="selo">quatro regras, sem exceção</span>
+    </div>
+
+    <div class="malha">
+      <div>
+        <h3>Escala de espaço</h3>
+        <p class="nota">8 · 16 · 24 · 40 · 72. Nada fora da escala — o mesmo módulo de 8&nbsp;px do símbolo
+        e do pixel art, para que a interface e a arte partilhem a malha em vez de se aproximarem.</p>
+      </div>
+      <div>
+        <h3>Cantos retos</h3>
+        <p class="nota">Zero <code>border-radius</code> em toda a interface. A geometria reta é o eco do
+        pixel, e é também a decisão mais fácil de quebrar sem reparar — um único canto arredondado num
+        componente novo denuncia-se ao lado de qualquer outro.</p>
+      </div>
+      <div>
+        <h3>Alvo de 44 px</h3>
+        <p class="nota">Piso de 44&nbsp;px (WCAG 2.5.5) em tudo que se toca, e pela <em>geometria</em>: o
+        token <code>--tap</code> entra como <code>min-height</code> na regra, não como número repetido em
+        cada componente.</p>
+      </div>
+      <div>
+        <h3>Movimento</h3>
+        <p class="nota">Transições de 120–200&nbsp;ms, só em opacidade e cor. Nada pisca. Tudo desliga com
+        <code>prefers-reduced-motion</code> — e esta página não declara animação nenhuma, o que é dito e não
+        presumido, para quem for acrescentar a primeira.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── 05 ─────────────────────────── -->
+  <section class="bloco">
+    <div class="titulo">
+      <h2>05 · Cor nunca sozinha</h2>
+      <span class="selo">estado com três sinais</span>
+    </div>
+
+    <p>
+      O chip de habilidade é o átomo do produto, e o seu estado selecionado carrega <strong>três</strong>
+      sinais e não um: borda mais grossa, fundo trocado e um ícone. Experimente — e depois volte a olhar
+      com o tema claro, ou com o ecrã em cinza: o estado continua legível em qualquer um dos três, mesmo que
+      dois se percam.
+    </p>
+
+    <div class="demo">
+      <button type="button" class="sinal" aria-pressed="false">
+        <span class="marca-ok" aria-hidden="true"></span><span>EF06MA05</span>
+      </button>
+      <button type="button" class="sinal" aria-pressed="true">
+        <span class="marca-ok" aria-hidden="true">✓</span><span>EF02MA08</span>
+      </button>
+      <button type="button" class="sinal" aria-pressed="false">
+        <span class="marca-ok" aria-hidden="true"></span><span>EF67EF05</span>
+      </button>
+    </div>
+
+    <p class="nota">
+      O estado vive em <code>aria-pressed</code>, e o CSS lê o atributo em vez de uma classe paralela. Isso
+      fecha por construção a falha mais comum do componente: a classe que diz «selecionado» ao olho e o
+      atributo que diz «não» ao leitor de ecrã, cada um atualizado por um sítio diferente do código.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── 06 ─────────────────────────── -->
+  <section class="bloco">
+    <div class="titulo">
+      <h2>06 · O balanço</h2>
+      <span class="selo">o que existe e o que é só especificação</span>
+    </div>
+
+    <p>
+      Um estudo de caso que só mostrasse o que funciona seria um anúncio. Esta é a conta inteira, e a coluna
+      da direita é a que interessa a quem vai continuar o trabalho.
+    </p>
+
+    <div class="rolagem">
+      <table class="balanco">
+        <thead>
+          <tr><th scope="col">Peça</th><th scope="col">Nesta entrega</th><th scope="col">Estado</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Símbolo e wordmark</td><td class="usa">SVG em contornos, no cabeçalho e no favicon</td><td>Em uso</td></tr>
+          <tr><td>Trio da marca e tokens</td><td class="usa">Os mesmos tokens no <code>index.html</code>, no 404 e aqui</td><td>Em uso</td></tr>
+          <tr><td>Tema claro e escuro</td><td class="usa">Alternador com preferência guardada no aparelho</td><td>Em uso</td></tr>
+          <tr><td>Alvo de 44 px e foco visível</td><td class="usa">Regra global, não decisão por componente</td><td>Em uso</td></tr>
+          <tr><td>Estado com três sinais</td><td class="usa">Chips do passo 1 da jornada</td><td>Em uso</td></tr>
+          <tr><td>As cinco famílias tipográficas</td><td class="spec">Pilha do sistema, à espera de build que empacote</td><td>Especificação</td></tr>
+          <tr><td>Barra global de acessibilidade</td><td class="spec">AAA, texto 125%, reduzir movimento, fonte de leitor iniciante, idioma</td><td>Especificação</td></tr>
+          <tr><td>Moldura de jogo com HUD fora do canvas</td><td class="spec">Depende do cartucho, que ainda não é publicado</td><td>Especificação</td></tr>
+          <tr><td>Perfis de acesso</td><td class="spec">Estudante, professor, profissional externo, gestão</td><td>Especificação</td></tr>
+          <tr><td>Currículo por país e caligrafia regional</td><td class="spec">55 currículos extraídos, à espera de leitura humana</td><td>Especificação</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="faixa">
+    <p>
+      A autoridade sobre a identidade é o brandbook, em
+      <code>research/design-system/Inclusionista-Marca.dc.html</code>, e o design system ao lado dele. Se
+      esta página e eles divergirem sem que a divergência esteja escrita aqui, eles ganham.
+    </p>
+    <p>
+      Código sob <strong>AGPL-3.0-or-later</strong>. A arte não é AGPL. A titularidade patrimonial é do
+      Município. · <a href="index.html">Voltar à jornada</a>
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+
+  /* ── tema ─────────────────────────────────────────────────────────────── */
+  var btnTema = $('#tema');
+  btnTema.addEventListener('click', function () {
+    var claro = document.documentElement.dataset.theme === 'light';
+    document.documentElement.dataset.theme = claro ? 'dark' : 'light';
+    btnTema.textContent = claro ? 'Tema claro' : 'Tema escuro';
+    try { localStorage.setItem('incl-tema', claro ? 'dark' : 'light'); } catch (e) { /* sem storage, sem drama */ }
+    pinta();
+  });
+  try {
+    var guardado = localStorage.getItem('incl-tema');
+    if (guardado === 'light') {
+      document.documentElement.dataset.theme = 'light';
+      btnTema.textContent = 'Tema escuro';
+    }
+  } catch (e) { /* idem */ }
+
+  /* ── contraste, pela WCAG 2 ───────────────────────────────────────────────
+     ⚠️ A PÁGINA CALCULA OS PRÓPRIOS NÚMEROS, lendo os tokens que a pintam. Transcrever uma razão é
+     criar um segundo facto sobre a mesma cor, e dois factos sobre a mesma coisa divergem — foi o que
+     aconteceu no brandbook, em cinco das sete que ele afirma. */
+  function canal(c) { var s = c / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); }
+  function lum(hex) {
+    var h = hex.trim().replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return 0.2126 * canal(r) + 0.7152 * canal(g) + 0.0722 * canal(b);
+  }
+  function razao(a, b) {
+    var x = lum(a), y = lum(b);
+    if (y > x) { var t = x; x = y; y = t; }
+    return (x + 0.05) / (y + 0.05);
+  }
+  var token = function (nome) {
+    return getComputedStyle(document.documentElement).getPropertyValue(nome).trim();
+  };
+  var fmt = function (r) { return r.toFixed(1).replace('.', ',') + ':1'; };
+
+  /* As amostras do tema corrente. `sobre` é o fundo contra o qual cada uma é medida, e `papel` decide
+     QUAL piso se aplica — 4,5:1 para texto (WCAG 1.4.3) e 3:1 para linha, fronteira e contorno
+     (WCAG 1.4.11). Medir tudo contra 4,5 daria falha a coisas que não são texto e passaria a ideia
+     errada de que a paleta está partida; medir tudo contra 3 absolveria texto ilegível. */
+  var PISO = { texto: 4.5, linha: 3 };
+  var AMOSTRAS = [
+    { nome: 'Texto',          tk: '--text',     sobre: '--bg',     papel: 'texto', uso: 'corpo e títulos' },
+    { nome: 'Texto de apoio', tk: '--dim',      sobre: '--bg',     papel: 'texto', uso: 'parágrafos secundários' },
+    { nome: 'Texto fraco',    tk: '--sub',      sobre: '--bg',     papel: 'texto', uso: 'legendas e notas' },
+    { nome: 'Azul',           tk: '--blue',     sobre: '--bg',     papel: 'texto', uso: 'ligações, códigos, rótulos' },
+    { nome: 'Verde',          tk: '--green',    sobre: '--bg',     papel: 'texto', uso: 'confirmação e progresso' },
+    { nome: 'Erro',           tk: '--error',    sobre: '--bg',     papel: 'texto', uso: 'falha e recusa' },
+    { nome: 'Tinta no amarelo', tk: '--onAccent', sobre: '--yellow', papel: 'texto', uso: 'texto sobre o botão primário' },
+    { nome: 'Amarelo · linha', tk: '--yellowInk', sobre: '--bg',    papel: 'linha', uso: 'bordas, fronteiras e o anel de foco' }
+  ];
+
+  function pinta() {
+    var alvo = $('#amostras');
+    alvo.textContent = '';
+    AMOSTRAS.forEach(function (a) {
+      var cor = token(a.tk), fundo = token(a.sobre);
+      var r = razao(cor, fundo);
+      var piso = PISO[a.papel];
+      var passa = r >= piso;
+
+      var cx = document.createElement('div');
+      cx.className = 'amostra';
+
+      var chapa = document.createElement('div');
+      chapa.className = 'chapa';
+      chapa.style.background = fundo;
+      chapa.style.color = cor;
+      chapa.textContent = 'Aa · Il1 O0 bd';
+
+      var corpo = document.createElement('div');
+      corpo.className = 'corpo';
+      var b = document.createElement('b'); b.textContent = a.nome;
+      var c = document.createElement('code'); c.textContent = cor;
+      var d = document.createElement('div');
+      d.className = 'razao';
+      var forte = document.createElement('strong'); forte.textContent = fmt(r);
+      var ver = document.createElement('span');
+      ver.className = passa ? 'passa' : 'falha';
+      ver.textContent = passa ? ' AA' : ' abaixo do piso';
+      d.append(forte, ver, document.createElement('br'));
+      var u = document.createElement('small');
+      u.textContent = a.uso + ' · piso ' + String(piso).replace('.', ',') + ':1';
+      d.append(u);
+
+      corpo.append(b, c, d);
+      cx.append(chapa, corpo);
+      alvo.append(cx);
+    });
+
+    // As três razões do achado do §01 — do símbolo, cujo trio NÃO muda com o tema, logo são literais.
+    $('#razaoVA').textContent = fmt(razao('#0B7A46', '#2E5BFF'));
+    $('#razaoAV').textContent = fmt(razao('#FFDD1C', '#0B7A46'));
+    $('#razaoAA').textContent = fmt(razao('#FFDD1C', '#2E5BFF'));
+  }
+
+  /* ── a demonstração dos três sinais ───────────────────────────────────── */
+  Array.prototype.forEach.call(document.querySelectorAll('.sinal'), function (b) {
+    b.addEventListener('click', function () {
+      var ligado = b.getAttribute('aria-pressed') === 'true';
+      b.setAttribute('aria-pressed', ligado ? 'false' : 'true');
+      b.querySelector('.marca-ok').textContent = ligado ? '' : '✓';
+    });
+  });
+
+  pinta();
+})();
+</script>
+</body>
+</html>
